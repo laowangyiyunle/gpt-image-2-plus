@@ -218,7 +218,7 @@ export function ChatShell() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ title: args.prompt })
+        body: JSON.stringify({ initialContent: args.prompt })
       });
 
       sessionId = created.session.id;

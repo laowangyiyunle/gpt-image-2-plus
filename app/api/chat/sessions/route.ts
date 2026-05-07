@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "会话参数不合法" }, { status: 400 });
   }
 
-  const session = await createSession(parsed.data.title);
+  const session = await createSession(
+    parsed.data.initialContent ?? parsed.data.title
+  );
   return NextResponse.json({ session }, { status: 201 });
 }

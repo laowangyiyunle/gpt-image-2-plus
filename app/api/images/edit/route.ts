@@ -11,6 +11,7 @@ import {
   createUserMessage,
   getSessionById
 } from "@/lib/services/session-service";
+import { editImageSchema } from "@/lib/validations/chat";
 
 export const runtime = "nodejs";
 
@@ -20,17 +21,20 @@ export async function POST(request: NextRequest) {
   await ensureStorageDirs();
 
   const formData = await request.formData();
-  const sessionId = String(formData.get("sessionId") ?? "").trim();
-  const prompt = String(formData.get("prompt") ?? "").trim();
   const imageFile = formData.get("image");
-  const size = String(formData.get("size") ?? "").trim() || undefined;
-  const quality = String(formData.get("quality") ?? "").trim() || undefined;
-  const countValue = Number(formData.get("count") ?? 1);
-  const count = Number.isFinite(countValue) ? countValue : 1;
+  const parsed = editImageSchema.safeParse({
+    sessionId: formData.get("sessionId"),
+    prompt: formData.get("prompt"),
+    size: formData.get("size"),
+    quality: formData.get("quality"),
+    count: formData.get("count")
+  });
 
-  if (!sessionId || !prompt || !(imageFile instanceof File)) {
+  if (!parsed.success || !(imageFile instanceof File)) {
     return NextResponse.json({ error: "请求参数不完整" }, { status: 400 });
   }
+
+  const { sessionId, prompt, size, quality, count } = parsed.data;
 
   if (!imageFile.type.startsWith("image/")) {
     return NextResponse.json({ error: "只支持图片文件" }, { status: 400 });
