@@ -1,0 +1,73 @@
+import { toFile } from "openai/uploads";
+import { getOpenAIClient } from "@/lib/openai/client";
+import {
+  extensionFromMimeType,
+  saveBufferAsFile
+} from "@/lib/storage/file-storage";
+
+function extractBase64Images(response: {
+  data?: Array<{ b64_json?: string }>;
+}) {
+  const buffers =
+    response.data
+      ?.map((item) => item.b64_json)
+      .filter((base64): base64 is string => Boolean(base64))
+      .map((base64) => Buffer.from(base64, "base64")) ?? [];
+
+  if (buffers.length === 0) {
+    throw new Error("Image API returned no base64 image data");
+  }
+
+  return buffers;
+}
+
+export async function generateImageFromPrompt(args: {
+  prompt: string;
+  size?: string;
+  quality?: string;
+  count?: number;
+}) {
+  const client = getOpenAIClient();
+  const response = await client.images.generate({
+    model: "gpt-image-1",
+    prompt: args.prompt,
+    size: (args.size as "1024x1024" | "1536x1024" | "1024x1536" | "auto" | undefined) ?? "auto",
+    quality:
+      (args.quality as "low" | "medium" | "high" | "auto" | undefined) ?? "auto",
+    n: args.count ?? 1
+  });
+
+  const buffers = extractBase64Images(response);
+  return Promise.all(
+    buffers.map((buffer) => saveBufferAsFile(buffer, "generated", "png"))
+  );
+}
+
+export async function generateImageFromEdit(args: {
+  prompt: string;
+  imageBuffer: Buffer;
+  imageMimeType: string;
+  size?: string;
+  quality?: string;
+  count?: number;
+}) {
+  const client = getOpenAIClient();
+  const extension = extensionFromMimeType(args.imageMimeType);
+
+  const response = await client.images.edit({
+    model: "gpt-image-1",
+    prompt: args.prompt,
+    image: await toFile(args.imageBuffer, `input.${extension}`, {
+      type: args.imageMimeType
+    }),
+    size: (args.size as "1024x1024" | "1536x1024" | "1024x1536" | "auto" | undefined) ?? "auto",
+    quality:
+      (args.quality as "low" | "medium" | "high" | "auto" | undefined) ?? "auto",
+    n: args.count ?? 1
+  });
+
+  const buffers = extractBase64Images(response);
+  return Promise.all(
+    buffers.map((buffer) => saveBufferAsFile(buffer, "generated", "png"))
+  );
+}

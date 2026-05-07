@@ -1,0 +1,15 @@
+node_modules
+.next
+.superpowers
+.env
+.env.local
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.log
+tsconfig.tsbuildinfo
+public/uploads/*
+!public/uploads/.gitkeep
+public/generated/*
+!public/generated/.gitkeep
