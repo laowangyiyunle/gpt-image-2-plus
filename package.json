@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:validations": "node --no-warnings --experimental-strip-types tests/validations-chat.test.mjs",
+    "test:validations": "node --no-warnings --experimental-strip-types tests/validations-chat.test.mjs && node --no-warnings --experimental-strip-types tests/image-model.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

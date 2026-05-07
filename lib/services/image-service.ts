@@ -1,5 +1,6 @@
 import { toFile } from "openai/uploads";
 import { getOpenAIClient } from "@/lib/openai/client";
+import { IMAGE_GENERATION_MODEL } from "@/lib/openai/image-model";
 import {
   extensionFromMimeType,
   saveBufferAsFile
@@ -29,7 +30,7 @@ export async function generateImageFromPrompt(args: {
 }) {
   const client = getOpenAIClient();
   const response = await client.images.generate({
-    model: "gpt-image-1",
+    model: IMAGE_GENERATION_MODEL,
     prompt: args.prompt,
     size: (args.size as "1024x1024" | "1536x1024" | "1024x1536" | "auto" | undefined) ?? "auto",
     quality:
@@ -55,7 +56,7 @@ export async function generateImageFromEdit(args: {
   const extension = extensionFromMimeType(args.imageMimeType);
 
   const response = await client.images.edit({
-    model: "gpt-image-1",
+    model: IMAGE_GENERATION_MODEL,
     prompt: args.prompt,
     image: await toFile(args.imageBuffer, `input.${extension}`, {
       type: args.imageMimeType
