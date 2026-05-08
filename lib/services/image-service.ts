@@ -22,6 +22,10 @@ function extractBase64Images(response: {
   return buffers;
 }
 
+export function saveGeneratedBase64Image(base64: string, extension = "png") {
+  return saveBufferAsFile(Buffer.from(base64, "base64"), "generated", extension);
+}
+
 export async function generateImageFromPrompt(args: {
   prompt: string;
   size?: string;
@@ -42,6 +46,26 @@ export async function generateImageFromPrompt(args: {
   return Promise.all(
     buffers.map((buffer) => saveBufferAsFile(buffer, "generated", "png"))
   );
+}
+
+export async function streamImagesFromPrompt(args: {
+  prompt: string;
+  size?: string;
+  quality?: string;
+  count?: number;
+}) {
+  const client = getOpenAIClient();
+
+  return client.images.generate({
+    model: IMAGE_GENERATION_MODEL,
+    prompt: args.prompt,
+    size: (args.size as "1024x1024" | "1536x1024" | "1024x1536" | "auto" | undefined) ?? "auto",
+    quality:
+      (args.quality as "low" | "medium" | "high" | "auto" | undefined) ?? "auto",
+    n: args.count ?? 1,
+    partial_images: 2,
+    stream: true
+  });
 }
 
 export async function generateImageFromEdit(args: {
@@ -71,4 +95,30 @@ export async function generateImageFromEdit(args: {
   return Promise.all(
     buffers.map((buffer) => saveBufferAsFile(buffer, "generated", "png"))
   );
+}
+
+export async function streamImagesFromEdit(args: {
+  prompt: string;
+  imageBuffer: Buffer;
+  imageMimeType: string;
+  size?: string;
+  quality?: string;
+  count?: number;
+}) {
+  const client = getOpenAIClient();
+  const extension = extensionFromMimeType(args.imageMimeType);
+
+  return client.images.edit({
+    model: IMAGE_GENERATION_MODEL,
+    prompt: args.prompt,
+    image: await toFile(args.imageBuffer, `input.${extension}`, {
+      type: args.imageMimeType
+    }),
+    size: (args.size as "1024x1024" | "1536x1024" | "1024x1536" | "auto" | undefined) ?? "auto",
+    quality:
+      (args.quality as "low" | "medium" | "high" | "auto" | undefined) ?? "auto",
+    n: args.count ?? 1,
+    partial_images: 2,
+    stream: true
+  });
 }

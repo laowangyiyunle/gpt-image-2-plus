@@ -91,3 +91,12 @@ export function getDb() {
 
   return db;
 }
+
+export function closeDbForTests() {
+  if (!globalForDb.sqlite) {
+    return;
+  }
+
+  globalForDb.sqlite.close();
+  globalForDb.sqlite = undefined;
+}

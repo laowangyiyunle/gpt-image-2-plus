@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ChatImageAsset, ChatMessage } from "@/lib/types/chat";
 import { MessageItem } from "@/components/chat/message-item";
 
@@ -22,12 +22,19 @@ export function MessageList({
   onPreviewImage
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollKey = useMemo(
+    () =>
+      messages
+        .map((message) => `${message.id}:${message.status}:${message.images.length}`)
+        .join("|"),
+    [messages]
+  );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
       block: "end"
     });
-  }, [messages]);
+  }, [scrollKey]);
 
   if (messages.length === 0) {
     return (

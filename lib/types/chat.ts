@@ -6,6 +6,12 @@ export type ChatImageAsset = {
   isPending?: boolean;
 };
 
+export type ChatProgress = {
+  percent: number;
+  label: string;
+  elapsedSeconds: number;
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -13,6 +19,7 @@ export type ChatMessage = {
   status: "pending" | "success" | "failed";
   images: ChatImageAsset[];
   createdAt: string;
+  progress?: ChatProgress;
 };
 
 export type ChatSession = {

@@ -49,6 +49,7 @@ export function ChatComposer({
   const [quality, setQuality] = useState("auto");
   const [count, setCount] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -184,10 +185,61 @@ export function ChatComposer({
     setSelectedImage(normalizedImage);
   }
 
+  async function handleOptimizePrompt() {
+    const trimmedPrompt = prompt.trim();
+
+    if (!trimmedPrompt) {
+      setError("请先输入要优化的提示词。");
+      textareaRef.current?.focus();
+      return;
+    }
+
+    try {
+      setOptimizing(true);
+      setError(null);
+      const response = await fetch("/api/prompts/optimize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ prompt: trimmedPrompt })
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        prompt?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !data.prompt) {
+        throw new Error(data.error || "优化失败，请稍后重试。");
+      }
+
+      setPrompt(data.prompt);
+      textareaRef.current?.focus();
+    } catch (optimizeError) {
+      setError(
+        optimizeError instanceof Error
+          ? optimizeError.message
+          : "优化失败，请稍后重试。"
+      );
+    } finally {
+      setOptimizing(false);
+    }
+  }
+
   return (
     <form ref={formRef} className="chat-composer" onSubmit={handleSubmit}>
       <label className="composer-textarea-label">
-        <span>输入提示词</span>
+        <span className="composer-label-row">
+          <span>输入提示词</span>
+          <button
+            type="button"
+            className="prompt-optimize-button"
+            disabled={disabled || submitting || optimizing}
+            onClick={() => void handleOptimizePrompt()}
+          >
+            {optimizing ? "优化中..." : "优化提示词"}
+          </button>
+        </span>
         <textarea
           ref={textareaRef}
           name="prompt"
@@ -195,7 +247,7 @@ export function ChatComposer({
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={handlePromptKeyDown}
           onPaste={handlePromptPaste}
-          disabled={disabled || submitting}
+          disabled={disabled || submitting || optimizing}
           placeholder="请输入你想生成的图片内容，支持中文描述。按 Enter 发送，Shift + Enter 换行，也支持直接粘贴图片。"
           rows={4}
         />
@@ -207,7 +259,7 @@ export function ChatComposer({
           <select
             value={size}
             onChange={(event) => setSize(event.target.value)}
-            disabled={disabled || submitting}
+            disabled={disabled || submitting || optimizing}
           >
             <option value="auto">自动</option>
             <option value="1024x1024">方图</option>
@@ -220,7 +272,7 @@ export function ChatComposer({
           <select
             value={quality}
             onChange={(event) => setQuality(event.target.value)}
-            disabled={disabled || submitting}
+            disabled={disabled || submitting || optimizing}
           >
             <option value="auto">自动</option>
             <option value="low">低</option>
@@ -239,7 +291,7 @@ export function ChatComposer({
               const nextValue = Number(event.target.value) || 1;
               setCount(Math.max(1, Math.min(4, nextValue)));
             }}
-            disabled={disabled || submitting}
+            disabled={disabled || submitting || optimizing}
           />
         </label>
       </div>
@@ -259,7 +311,7 @@ export function ChatComposer({
             type="button"
             className="composer-preview-remove"
             onClick={clearSelectedImage}
-            disabled={disabled || submitting}
+            disabled={disabled || submitting || optimizing}
           >
             删除参考图
           </button>
@@ -275,14 +327,14 @@ export function ChatComposer({
             name="image"
             accept="image/png,image/jpeg,image/webp"
             onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
-            disabled={disabled || submitting}
+            disabled={disabled || submitting || optimizing}
           />
           <span>{previewUrl ? "重新选择参考图" : "上传参考图"}</span>
         </label>
         <span className="selected-file-name">
           {selectedFileName || "未选择文件"}
         </span>
-        <button type="submit" disabled={disabled || submitting}>
+        <button type="submit" disabled={disabled || submitting || optimizing}>
           {submitting ? "生成中..." : "发送生成"}
         </button>
       </div>

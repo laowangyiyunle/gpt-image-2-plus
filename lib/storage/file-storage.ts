@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { buildStoredFileName, safeJoin } from "@/lib/security/path-safety";
+import { buildStoredFileName, safeJoin } from "../security/path-safety.ts";
 
 const publicDir = path.join(process.cwd(), "public");
 const uploadDir = path.join(publicDir, "uploads");

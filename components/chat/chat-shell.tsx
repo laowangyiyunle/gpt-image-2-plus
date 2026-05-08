@@ -8,6 +8,7 @@ import {
 import { MessageList } from "@/components/chat/message-list";
 import { SessionSidebar } from "@/components/history/session-sidebar";
 import { OpenAIKeySettings } from "@/components/settings/openai-key-settings";
+import { withRecoverablePendingProgressAt } from "@/lib/chat-message-display";
 import type { ChatImageAsset, ChatMessage, ChatSession } from "@/lib/types/chat";
 
 type SessionDetailsResponse = {
@@ -34,6 +35,11 @@ type KeyStatus = {
   source: "database" | "env" | "default";
 };
 
+type ImageJobResponse = {
+  userMessage: ChatMessage;
+  message: ChatMessage;
+};
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const data = (await response.json().catch(() => ({}))) as T & {
@@ -45,41 +51,6 @@ async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   }
 
   return data;
-}
-
-function buildPendingUserImages(imageFile: File | null): ChatImageAsset[] {
-  if (!imageFile) {
-    return [];
-  }
-
-  return [
-    {
-      id: `pending-upload-${crypto.randomUUID()}`,
-      filePath: URL.createObjectURL(imageFile),
-      mimeType: imageFile.type,
-      sourceType: "uploaded",
-      isPending: true
-    }
-  ];
-}
-
-function buildPendingAssistantMessage(imageFile: File | null, count: number) {
-  const pendingCount = Math.max(1, Math.min(4, count));
-
-  return {
-    id: `pending-assistant-${crypto.randomUUID()}`,
-    role: "assistant" as const,
-    content: imageFile ? "正在根据参考图生成图片..." : "正在生成图片...",
-    status: "pending" as const,
-    createdAt: new Date().toISOString(),
-    images: Array.from({ length: pendingCount }, () => ({
-      id: `pending-generated-${crypto.randomUUID()}`,
-      filePath: "",
-      mimeType: "image/png",
-      sourceType: "generated",
-      isPending: true
-    }))
-  };
 }
 
 function fileNameFromPath(filePath: string, fallbackExtension: string) {
@@ -112,11 +83,18 @@ export function ChatShell() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isAwaitingResponse, setIsAwaitingResponse] = useState(false);
+  const [isSubmittingJob, setIsSubmittingJob] = useState(false);
   const [composerDraft, setComposerDraft] = useState<ComposerDraft | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [appMessage, setAppMessage] = useState("");
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const hasPendingMessages = messages.some((message) => message.status === "pending");
+  const isBusy = isSubmittingJob || hasPendingMessages;
+  const displayMessages = useMemo(
+    () => withRecoverablePendingProgressAt(messages, nowMs),
+    [messages, nowMs]
+  );
 
   async function loadSessions(selectLatest = false) {
     const data = await fetchJson<{ sessions: ChatSession[] }>("/api/chat/sessions");
@@ -202,12 +180,37 @@ export function ChatShell() {
   }, []);
 
   useEffect(() => {
-    if (!activeSessionId || isAwaitingResponse) {
+    if (!activeSessionId) {
       return;
     }
 
     void loadSession(activeSessionId);
-  }, [activeSessionId, isAwaitingResponse]);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!hasPendingMessages) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [hasPendingMessages]);
+
+  useEffect(() => {
+    if (!activeSessionId || !hasPendingMessages) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadSession(activeSessionId);
+      void loadSessions();
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [activeSessionId, hasPendingMessages]);
 
   async function handleSubmit(args: SubmitArgs) {
     let sessionId = activeSessionId;
@@ -230,45 +233,25 @@ export function ChatShell() {
       throw new Error("无法创建会话");
     }
 
-    const pendingUserImageUrls = buildPendingUserImages(args.imageFile);
-    const pendingUserMessage: ChatMessage = {
-      id: `pending-user-${crypto.randomUUID()}`,
-      role: "user",
-      content: args.prompt,
-      status: "success",
-      createdAt: new Date().toISOString(),
-      images: pendingUserImageUrls
-    };
-    const pendingAssistantMessage = buildPendingAssistantMessage(
-      args.imageFile,
-      args.count
-    );
-
-    setMessages((current) => [
-      ...current,
-      pendingUserMessage,
-      pendingAssistantMessage
-    ]);
-    setIsAwaitingResponse(true);
-
     try {
+      setIsSubmittingJob(true);
+      let data: ImageJobResponse;
+
       if (args.imageFile) {
         const formData = new FormData();
         formData.set("sessionId", sessionId);
         formData.set("prompt", args.prompt);
         formData.set("image", args.imageFile);
+        formData.set("size", args.size);
+        formData.set("quality", args.quality);
+        formData.set("count", String(args.count));
 
-        await fetchJson("/api/images/edit", {
+        data = await fetchJson<ImageJobResponse>("/api/images/edit/job", {
           method: "POST",
-          body: (() => {
-            formData.set("size", args.size);
-            formData.set("quality", args.quality);
-            formData.set("count", String(args.count));
-            return formData;
-          })()
+          body: formData
         });
       } else {
-        await fetchJson("/api/images/generate", {
+        data = await fetchJson<ImageJobResponse>("/api/images/generate/job", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -283,37 +266,20 @@ export function ChatShell() {
         });
       }
 
-      await loadSessions();
-      await loadSession(sessionId);
-    } catch (error) {
       setMessages((current) =>
-        current.map((message) => {
-          if (message.id === pendingAssistantMessage.id) {
-            return {
-              ...message,
-              content:
-                error instanceof Error ? error.message : "生成失败，请稍后重试。",
-              status: "failed",
-              images: []
-            };
-          }
-
-          return message;
-        })
+        [...current, data.userMessage, data.message]
       );
 
+      await loadSessions();
+    } catch (error) {
       setAppMessage(
         error instanceof Error ? error.message : "生成失败，请稍后重试。"
       );
+      await loadSessions().catch(() => undefined);
+      await loadSession(sessionId).catch(() => undefined);
       throw error;
     } finally {
-      setIsAwaitingResponse(false);
-
-      for (const image of pendingUserImageUrls) {
-        if (image.filePath) {
-          URL.revokeObjectURL(image.filePath);
-        }
-      }
+      setIsSubmittingJob(false);
     }
   }
 
@@ -375,7 +341,7 @@ export function ChatShell() {
   }
 
   async function runAction(action: () => Promise<void>) {
-    if (isAwaitingResponse) {
+    if (isBusy) {
       return;
     }
 
@@ -405,7 +371,7 @@ export function ChatShell() {
       <SessionSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
-        disabled={isAwaitingResponse}
+        disabled={isBusy}
         onSelect={setActiveSessionId}
         onDelete={(sessionId) => {
           void handleDeleteSession(sessionId);
@@ -437,8 +403,8 @@ export function ChatShell() {
           ) : null}
 
           <MessageList
-            messages={messages}
-            disabled={isAwaitingResponse}
+            messages={displayMessages}
+            disabled={isBusy}
             onReuseImage={(message) => {
               void runAction(() => handleReuseImage(message));
             }}
@@ -459,7 +425,7 @@ export function ChatShell() {
           <ChatComposer
             activeSessionId={activeSessionId}
             draft={composerDraft}
-            disabled={isAwaitingResponse}
+            disabled={isBusy}
             onSubmitted={handleSubmit}
           />
         </>
