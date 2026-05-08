@@ -90,7 +90,7 @@ export function ChatShell() {
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const hasPendingMessages = messages.some((message) => message.status === "pending");
-  const isBusy = isSubmittingJob || hasPendingMessages;
+  const isComposerDisabled = isSubmittingJob || hasPendingMessages;
   const displayMessages = useMemo(
     () => withRecoverablePendingProgressAt(messages, nowMs),
     [messages, nowMs]
@@ -206,7 +206,6 @@ export function ChatShell() {
 
     const timer = window.setInterval(() => {
       void loadSession(activeSessionId);
-      void loadSessions();
     }, 2000);
 
     return () => window.clearInterval(timer);
@@ -341,7 +340,7 @@ export function ChatShell() {
   }
 
   async function runAction(action: () => Promise<void>) {
-    if (isBusy) {
+    if (isSubmittingJob) {
       return;
     }
 
@@ -371,7 +370,7 @@ export function ChatShell() {
       <SessionSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
-        disabled={isBusy}
+        disabled={isSubmittingJob}
         onSelect={setActiveSessionId}
         onDelete={(sessionId) => {
           void handleDeleteSession(sessionId);
@@ -404,7 +403,7 @@ export function ChatShell() {
 
           <MessageList
             messages={displayMessages}
-            disabled={isBusy}
+            disabled={isSubmittingJob}
             onReuseImage={(message) => {
               void runAction(() => handleReuseImage(message));
             }}
@@ -425,7 +424,7 @@ export function ChatShell() {
           <ChatComposer
             activeSessionId={activeSessionId}
             draft={composerDraft}
-            disabled={isBusy}
+            disabled={isComposerDisabled}
             onSubmitted={handleSubmit}
           />
         </>

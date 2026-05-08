@@ -43,6 +43,9 @@ export type StoredImageInput = {
   height?: number | null;
 };
 
+const DEFAULT_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
+const STALE_PENDING_MESSAGE = "生成任务已超时，请重新提交。";
+
 function mapSession(row: SessionRow) {
   return {
     id: row.id,
@@ -127,6 +130,7 @@ export async function listSessions() {
 
 export async function getSessionById(id: string) {
   const db = getDb();
+  expireStalePendingMessages({ sessionId: id });
   const sessionRow = db
     .prepare(
       `
@@ -163,13 +167,18 @@ export async function getSessionById(id: string) {
     )
     .all(id) as ImageAssetRow[];
 
+  const imagesByMessageId = new Map<string, ImageAssetRow[]>();
+
+  for (const image of imageRows) {
+    const current = imagesByMessageId.get(image.message_id) ?? [];
+    current.push(image);
+    imagesByMessageId.set(image.message_id, current);
+  }
+
   return {
     ...mapSession(sessionRow),
     messages: messageRows.map((message) =>
-      mapMessage(
-        message,
-        imageRows.filter((image) => image.message_id === message.id)
-      )
+      mapMessage(message, imagesByMessageId.get(message.id) ?? [])
     )
   };
 }
@@ -196,6 +205,92 @@ export async function createUserMessage(sessionId: string, content: string) {
     status: "success" as const,
     createdAt: now,
     images: []
+  };
+}
+
+function insertImageAssets(args: {
+  db: ReturnType<typeof getDb>;
+  sessionId: string;
+  messageId: string;
+  images?: StoredImageInput[];
+  createdAt: string;
+}) {
+  const insertImage = args.db.prepare(
+    `
+      INSERT INTO image_assets (
+        id, session_id, message_id, file_path, mime_type, width, height, source_type, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+  );
+
+  for (const image of args.images ?? []) {
+    insertImage.run(
+      createId(),
+      args.sessionId,
+      args.messageId,
+      image.filePath,
+      image.mimeType,
+      image.width ?? null,
+      image.height ?? null,
+      image.sourceType,
+      args.createdAt
+    );
+  }
+}
+
+export async function createImageGenerationMessages(args: {
+  sessionId: string;
+  prompt: string;
+  assistantContent: string;
+  assistantImages?: StoredImageInput[];
+}) {
+  const db = getDb();
+  const now = nowIso();
+  const userMessageId = createId();
+  const assistantMessageId = createId();
+
+  const transaction = db.transaction(() => {
+    db.prepare(
+      `
+        INSERT INTO messages (id, session_id, role, content, status, created_at)
+        VALUES (?, ?, 'user', ?, 'success', ?)
+      `
+    ).run(userMessageId, args.sessionId, args.prompt, now);
+
+    db.prepare(
+      `
+        INSERT INTO messages (id, session_id, role, content, status, created_at)
+        VALUES (?, ?, 'assistant', ?, 'pending', ?)
+      `
+    ).run(assistantMessageId, args.sessionId, args.assistantContent, now);
+
+    insertImageAssets({
+      db,
+      sessionId: args.sessionId,
+      messageId: assistantMessageId,
+      images: args.assistantImages,
+      createdAt: now
+    });
+
+    db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(
+      now,
+      args.sessionId
+    );
+  });
+
+  transaction();
+
+  const userMessage = getMessageWithImages(userMessageId);
+  const assistantMessage = getMessageWithImages(assistantMessageId);
+
+  if (!userMessage || !assistantMessage) {
+    throw new Error("Failed to create generation messages");
+  }
+
+  return {
+    userMessage,
+    assistantMessage
   };
 }
 
@@ -245,31 +340,15 @@ export async function createPendingAssistantMessage(args: {
     `
   );
 
-  const insertImage = db.prepare(
-    `
-      INSERT INTO image_assets (
-        id, session_id, message_id, file_path, mime_type, width, height, source_type, created_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  );
-
   const transaction = db.transaction(() => {
     insertMessage.run(messageId, args.sessionId, args.content, now);
-
-    for (const image of args.images ?? []) {
-      insertImage.run(
-        createId(),
-        args.sessionId,
-        messageId,
-        image.filePath,
-        image.mimeType,
-        image.width ?? null,
-        image.height ?? null,
-        image.sourceType,
-        now
-      );
-    }
+    insertImageAssets({
+      db,
+      sessionId: args.sessionId,
+      messageId,
+      images: args.images,
+      createdAt: now
+    });
 
     db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(
       now,
@@ -303,7 +382,10 @@ export async function updateAssistantMessageWithImages(args: {
       `
         SELECT id
         FROM messages
-        WHERE id = ? AND session_id = ? AND role = 'assistant'
+        WHERE id = ?
+          AND session_id = ?
+          AND role = 'assistant'
+          AND status = 'pending'
       `
     )
     .get(args.messageId, args.sessionId) as { id: string } | undefined;
@@ -312,39 +394,26 @@ export async function updateAssistantMessageWithImages(args: {
     return null;
   }
 
-  const insertImage = db.prepare(
-    `
-      INSERT INTO image_assets (
-        id, session_id, message_id, file_path, mime_type, width, height, source_type, created_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  );
-
   const transaction = db.transaction(() => {
     db.prepare(
       `
         UPDATE messages
         SET content = ?, status = ?
-        WHERE id = ? AND session_id = ? AND role = 'assistant'
+        WHERE id = ?
+          AND session_id = ?
+          AND role = 'assistant'
+          AND status = 'pending'
       `
     ).run(args.content, args.status, args.messageId, args.sessionId);
 
     db.prepare(`DELETE FROM image_assets WHERE message_id = ?`).run(args.messageId);
-
-    for (const image of args.images ?? []) {
-      insertImage.run(
-        createId(),
-        args.sessionId,
-        args.messageId,
-        image.filePath,
-        image.mimeType,
-        image.width ?? null,
-        image.height ?? null,
-        image.sourceType,
-        now
-      );
-    }
+    insertImageAssets({
+      db,
+      sessionId: args.sessionId,
+      messageId: args.messageId,
+      images: args.images,
+      createdAt: now
+    });
 
     db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(
       now,
@@ -355,6 +424,32 @@ export async function updateAssistantMessageWithImages(args: {
   transaction();
 
   return getMessageWithImages(args.messageId);
+}
+
+export function expireStalePendingMessages(args?: {
+  sessionId?: string;
+  olderThanMs?: number;
+  nowMs?: number;
+}) {
+  const db = getDb();
+  const olderThanMs = args?.olderThanMs ?? DEFAULT_PENDING_TIMEOUT_MS;
+  const nowMs = args?.nowMs ?? Date.now();
+  const cutoff = new Date(nowMs - olderThanMs).toISOString();
+
+  const sql = `
+    UPDATE messages
+    SET status = 'failed', content = ?
+    WHERE role = 'assistant'
+      AND status = 'pending'
+      AND created_at < ?
+      ${args?.sessionId ? "AND session_id = ?" : ""}
+  `;
+  const params = args?.sessionId
+    ? [STALE_PENDING_MESSAGE, cutoff, args.sessionId]
+    : [STALE_PENDING_MESSAGE, cutoff];
+  const result = db.prepare(sql).run(...params);
+
+  return result.changes;
 }
 
 export async function createAssistantMessageWithImages(args: {

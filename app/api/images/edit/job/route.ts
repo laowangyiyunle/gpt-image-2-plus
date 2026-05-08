@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ensureStorageDirs,
   extensionFromMimeType,
+  removeStoredFile,
   saveBufferAsFile
 } from "@/lib/storage/file-storage";
 import { startEditImageJob } from "@/lib/services/image-job-service";
@@ -50,25 +51,32 @@ export async function POST(request: NextRequest) {
     "upload",
     extensionFromMimeType(imageFile.type)
   );
-  const { userMessage, assistantMessage } = await startEditImageJob({
-    sessionId,
-    prompt,
-    size,
-    quality,
-    count,
-    imageBuffer: inputBuffer,
-    imageMimeType: imageFile.type,
-    uploadedImage: {
-      filePath: upload.publicPath,
-      mimeType: imageFile.type,
-      sourceType: "uploaded"
-    }
-  });
+  let job;
+
+  try {
+    job = await startEditImageJob({
+      sessionId,
+      prompt,
+      size,
+      quality,
+      count,
+      imageBuffer: inputBuffer,
+      imageMimeType: imageFile.type,
+      uploadedImage: {
+        filePath: upload.publicPath,
+        mimeType: imageFile.type,
+        sourceType: "uploaded"
+      }
+    });
+  } catch (error) {
+    await removeStoredFile(upload.publicPath).catch(() => undefined);
+    throw error;
+  }
 
   return NextResponse.json(
     {
-      userMessage,
-      message: assistantMessage
+      userMessage: job.userMessage,
+      message: job.assistantMessage
     },
     { status: 202 }
   );

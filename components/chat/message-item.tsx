@@ -35,16 +35,14 @@ export function MessageItem({
               </time>
             ) : null}
           </span>
-          {!isPending ? (
-            <button
-              type="button"
-              className="message-delete-button"
-              disabled={disabled}
-              onClick={() => onDelete?.(message)}
-            >
-              删除
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="message-delete-button"
+            disabled={disabled}
+            onClick={() => onDelete?.(message)}
+          >
+            {isPending ? "取消" : "删除"}
+          </button>
         </div>
         <p>{message.content}</p>
         {isPending ? (

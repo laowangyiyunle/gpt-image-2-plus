@@ -4,10 +4,10 @@ import {
 } from "@/lib/services/image-service";
 import type { StoredImageInput } from "@/lib/services/session-service";
 import {
-  createPendingAssistantMessage,
-  createUserMessage,
+  createImageGenerationMessages,
   updateAssistantMessageWithImages
 } from "@/lib/services/session-service";
+import { removeStoredFile } from "@/lib/storage/file-storage";
 
 type GenerateJobArgs = {
   sessionId: string;
@@ -32,9 +32,12 @@ function generationErrorMessage(error: unknown) {
 }
 
 async function finishGenerateJob(args: GenerateJobArgs & { messageId: string }) {
+  let savedImagePaths: string[] = [];
+
   try {
     const images = await generateImageFromPrompt(args);
-    await updateAssistantMessageWithImages({
+    savedImagePaths = images.map((image) => image.publicPath);
+    const updatedMessage = await updateAssistantMessageWithImages({
       messageId: args.messageId,
       sessionId: args.sessionId,
       content: "已为你生成图片。",
@@ -45,6 +48,10 @@ async function finishGenerateJob(args: GenerateJobArgs & { messageId: string }) 
         sourceType: "generated"
       }))
     });
+
+    if (!updatedMessage) {
+      await cleanupStoredFiles(savedImagePaths);
+    }
   } catch (error) {
     await updateAssistantMessageWithImages({
       messageId: args.messageId,
@@ -56,9 +63,12 @@ async function finishGenerateJob(args: GenerateJobArgs & { messageId: string }) 
 }
 
 async function finishEditJob(args: EditJobArgs & { messageId: string }) {
+  let savedImagePaths: string[] = [];
+
   try {
     const images = await generateImageFromEdit(args);
-    await updateAssistantMessageWithImages({
+    savedImagePaths = images.map((image) => image.publicPath);
+    const updatedMessage = await updateAssistantMessageWithImages({
       messageId: args.messageId,
       sessionId: args.sessionId,
       content: "已根据参考图生成新图片。",
@@ -72,6 +82,10 @@ async function finishEditJob(args: EditJobArgs & { messageId: string }) {
         }))
       ]
     });
+
+    if (!updatedMessage) {
+      await cleanupStoredFiles(savedImagePaths);
+    }
   } catch (error) {
     await updateAssistantMessageWithImages({
       messageId: args.messageId,
@@ -83,11 +97,17 @@ async function finishEditJob(args: EditJobArgs & { messageId: string }) {
   }
 }
 
+async function cleanupStoredFiles(filePaths: string[]) {
+  await Promise.all(
+    filePaths.map((filePath) => removeStoredFile(filePath).catch(() => undefined))
+  );
+}
+
 export async function startGenerateImageJob(args: GenerateJobArgs) {
-  const userMessage = await createUserMessage(args.sessionId, args.prompt);
-  const assistantMessage = await createPendingAssistantMessage({
+  const { userMessage, assistantMessage } = await createImageGenerationMessages({
     sessionId: args.sessionId,
-    content: "图片生成任务已提交，请稍等。"
+    prompt: args.prompt,
+    assistantContent: "图片生成任务已提交，请稍等。"
   });
 
   void finishGenerateJob({
@@ -104,11 +124,11 @@ export async function startGenerateImageJob(args: GenerateJobArgs) {
 }
 
 export async function startEditImageJob(args: EditJobArgs) {
-  const userMessage = await createUserMessage(args.sessionId, args.prompt);
-  const assistantMessage = await createPendingAssistantMessage({
+  const { userMessage, assistantMessage } = await createImageGenerationMessages({
     sessionId: args.sessionId,
-    content: "参考图生成任务已提交，请稍等。",
-    images: [args.uploadedImage]
+    prompt: args.prompt,
+    assistantContent: "参考图生成任务已提交，请稍等。",
+    assistantImages: [args.uploadedImage]
   });
 
   void finishEditJob({
