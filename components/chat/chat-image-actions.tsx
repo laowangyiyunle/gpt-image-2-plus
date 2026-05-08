@@ -1,15 +1,19 @@
 type ChatImageActionsProps = {
   imagePath: string;
   disabled?: boolean;
+  isTemplate?: boolean;
   onRetry?: () => void;
   onRefine?: () => void;
+  onToggleTemplate?: () => void;
 };
 
 export function ChatImageActions({
   imagePath,
   disabled = false,
+  isTemplate = false,
   onRetry,
-  onRefine
+  onRefine,
+  onToggleTemplate
 }: ChatImageActionsProps) {
   return (
     <div className="message-image-actions">
@@ -21,6 +25,9 @@ export function ChatImageActions({
       </button>
       <button type="button" onClick={onRefine} disabled={disabled}>
         继续细化
+      </button>
+      <button type="button" onClick={onToggleTemplate} disabled={disabled}>
+        {isTemplate ? "取消模板" : "设为模板"}
       </button>
     </div>
   );

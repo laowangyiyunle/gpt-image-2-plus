@@ -5,11 +5,19 @@ import {
   ChatComposer,
   type ComposerDraft
 } from "@/components/chat/chat-composer";
+import { ImageTemplateNameDialog } from "@/components/chat/image-template-name-dialog";
+import { ImagePreviewModal } from "@/components/chat/image-preview-modal";
+import { ImageTemplatePicker } from "@/components/chat/image-template-picker";
 import { MessageList } from "@/components/chat/message-list";
 import { SessionSidebar } from "@/components/history/session-sidebar";
 import { OpenAIKeySettings } from "@/components/settings/openai-key-settings";
 import { withRecoverablePendingProgressAt } from "@/lib/chat-message-display";
-import type { ChatImageAsset, ChatMessage, ChatSession } from "@/lib/types/chat";
+import type {
+  ChatImageAsset,
+  ChatMessage,
+  ChatSession,
+  ImageTemplate
+} from "@/lib/types/chat";
 
 type SessionDetailsResponse = {
   session: ChatSession & { messages: ChatMessage[] };
@@ -40,6 +48,14 @@ type ImageJobResponse = {
   message: ChatMessage;
 };
 
+type ImageTemplatesResponse = {
+  templates: ImageTemplate[];
+};
+
+type TemplateNameTarget =
+  | { mode: "create"; image: ChatImageAsset }
+  | { mode: "rename"; image: ImageTemplate };
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const data = (await response.json().catch(() => ({}))) as T & {
@@ -63,7 +79,7 @@ function fileNameFromPath(filePath: string, fallbackExtension: string) {
   return `reference.${fallbackExtension}`;
 }
 
-async function fileFromImageAsset(image: ChatImageAsset) {
+async function fileFromImageAsset(image: Pick<ChatImageAsset, "filePath" | "mimeType">) {
   const response = await fetch(image.filePath);
 
   if (!response.ok) {
@@ -88,6 +104,14 @@ export function ChatShell() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [appMessage, setAppMessage] = useState("");
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false);
+  const [templateNameTarget, setTemplateNameTarget] =
+    useState<TemplateNameTarget | null>(null);
+  const [templates, setTemplates] = useState<ImageTemplate[]>([]);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [templatePickerError, setTemplatePickerError] = useState("");
+  const [isSavingTemplateName, setIsSavingTemplateName] = useState(false);
+  const [templateNameError, setTemplateNameError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const hasPendingMessages = messages.some((message) => message.status === "pending");
   const isComposerDisabled = isSubmittingJob || hasPendingMessages;
@@ -115,6 +139,27 @@ export function ChatShell() {
       `/api/chat/sessions/${sessionId}`
     );
     setMessages(data.session.messages ?? []);
+  }
+
+  async function loadTemplates() {
+    setIsLoadingTemplates(true);
+    setTemplatePickerError("");
+
+    try {
+      const data = await fetchJson<ImageTemplatesResponse>("/api/images/templates");
+      setTemplates(data.templates);
+    } catch (error) {
+      setTemplatePickerError(
+        error instanceof Error ? error.message : "模板加载失败，请稍后重试。"
+      );
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+  }
+
+  function openTemplatePicker() {
+    setIsTemplatePickerOpen(true);
+    void loadTemplates();
   }
 
   async function createNewSession() {
@@ -318,6 +363,94 @@ export function ChatShell() {
     });
   }
 
+  async function saveImageTemplate(args: {
+    image: Pick<ChatImageAsset | ImageTemplate, "id">;
+    isTemplate: boolean;
+    templateName?: string | null;
+  }) {
+    await fetchJson<{ image: ChatImageAsset }>(
+      `/api/images/templates/${args.image.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          isTemplate: args.isTemplate,
+          templateName: args.templateName
+        })
+      }
+    );
+
+    if (activeSessionId) {
+      await loadSession(activeSessionId);
+    }
+
+    if (isTemplatePickerOpen) {
+      await loadTemplates();
+    }
+  }
+
+  async function handleToggleTemplate(image: ChatImageAsset) {
+    if (!image.isTemplate) {
+      setTemplateNameError("");
+      setTemplateNameTarget({ mode: "create", image });
+      return;
+    }
+
+    await saveImageTemplate({
+      image,
+      isTemplate: false,
+      templateName: null
+    });
+  }
+
+  async function handleCreateTemplate(templateName: string) {
+    if (!templateNameTarget) {
+      return;
+    }
+
+    try {
+      setIsSavingTemplateName(true);
+      setTemplateNameError("");
+      await saveImageTemplate({
+        image: templateNameTarget.image,
+        isTemplate: true,
+        templateName
+      });
+      setTemplateNameTarget(null);
+    } catch (error) {
+      setTemplateNameError(
+        error instanceof Error ? error.message : "模板保存失败，请稍后重试。"
+      );
+    } finally {
+      setIsSavingTemplateName(false);
+    }
+  }
+
+  async function handleSelectTemplate(template: ImageTemplate) {
+    const imageFile = await fileFromImageAsset(template);
+    setComposerDraft({
+      file: imageFile,
+      focus: true,
+      prompt: "",
+      version: Date.now()
+    });
+    setIsTemplatePickerOpen(false);
+  }
+
+  function handlePreviewTemplate(template: ImageTemplate) {
+    setPreviewImage({
+      filePath: template.filePath,
+      alt: template.templateName || "图片模板"
+    });
+  }
+
+  function handleRenameTemplate(template: ImageTemplate) {
+    setTemplateNameError("");
+    setTemplateNameTarget({ mode: "rename", image: template });
+  }
+
   async function handleRetry(message: ChatMessage) {
     const previousUserMessage = findPreviousUserMessage(message.id);
 
@@ -419,12 +552,16 @@ export function ChatShell() {
                 alt: image.sourceType === "uploaded" ? "参考图" : "生成结果"
               });
             }}
+            onToggleTemplate={(image) => {
+              void runAction(() => handleToggleTemplate(image));
+            }}
           />
 
           <ChatComposer
             activeSessionId={activeSessionId}
             draft={composerDraft}
             disabled={isComposerDisabled}
+            onOpenTemplatePicker={openTemplatePicker}
             onSubmitted={handleSubmit}
           />
         </>
@@ -470,25 +607,53 @@ export function ChatShell() {
       ) : null}
 
       {previewImage ? (
-        <div
-          className="image-preview-backdrop"
-          onClick={() => setPreviewImage(null)}
-        >
-          <div
-            className="image-preview-modal"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="image-preview-actions">
-              <a href={previewImage.filePath} download>
-                下载
-              </a>
-              <button type="button" onClick={() => setPreviewImage(null)}>
-                关闭
-              </button>
-            </div>
-            <img src={previewImage.filePath} alt={previewImage.alt} />
-          </div>
-        </div>
+        <ImagePreviewModal
+          filePath={previewImage.filePath}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
+        />
+      ) : null}
+
+      {isTemplatePickerOpen ? (
+        <ImageTemplatePicker
+          templates={templates}
+          loading={isLoadingTemplates}
+          error={templatePickerError}
+          onClose={() => setIsTemplatePickerOpen(false)}
+          onRefresh={() => void loadTemplates()}
+          onPreview={handlePreviewTemplate}
+          onRename={handleRenameTemplate}
+          onSelect={(template) => {
+            void runAction(() => handleSelectTemplate(template));
+          }}
+        />
+      ) : null}
+
+      {templateNameTarget ? (
+        <ImageTemplateNameDialog
+          image={templateNameTarget.image}
+          title={
+            templateNameTarget.mode === "rename" ? "重命名模板" : "设为模板"
+          }
+          description={
+            templateNameTarget.mode === "rename"
+              ? "修改模板名称，不会影响原图和会话内容。"
+              : "给这张生成图起一个名字，后续可以在输入区选择使用。"
+          }
+          submitLabel={
+            templateNameTarget.mode === "rename" ? "保存名称" : "保存模板"
+          }
+          saving={isSavingTemplateName}
+          error={templateNameError}
+          onClose={() => {
+            if (!isSavingTemplateName) {
+              setTemplateNameTarget(null);
+            }
+          }}
+          onSubmit={(templateName) => {
+            void handleCreateTemplate(templateName);
+          }}
+        />
       ) : null}
     </main>
   );

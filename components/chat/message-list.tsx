@@ -11,6 +11,7 @@ type MessageListProps = {
   onRetry?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
   onPreviewImage?: (image: ChatImageAsset) => void;
+  onToggleTemplate?: (image: ChatImageAsset) => void;
 };
 
 export function MessageList({
@@ -19,7 +20,8 @@ export function MessageList({
   onReuseImage,
   onRetry,
   onDelete,
-  onPreviewImage
+  onPreviewImage,
+  onToggleTemplate
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollKey = useMemo(
@@ -58,6 +60,7 @@ export function MessageList({
           onRetry={onRetry}
           onDelete={onDelete}
           onPreviewImage={onPreviewImage}
+          onToggleTemplate={onToggleTemplate}
         />
       ))}
       <div ref={bottomRef} />

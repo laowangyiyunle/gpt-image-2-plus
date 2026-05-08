@@ -4,6 +4,21 @@ export type ChatImageAsset = {
   mimeType: string;
   sourceType: string;
   isPending?: boolean;
+  isTemplate?: boolean;
+  templateName?: string | null;
+};
+
+export type ImageTemplate = {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  messageId: string;
+  filePath: string;
+  mimeType: string;
+  sourceType: string;
+  templateName: string | null;
+  prompt: string;
+  createdAt: string;
 };
 
 export type ChatProgress = {

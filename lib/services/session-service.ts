@@ -28,6 +28,8 @@ type ImageAssetRow = {
   width: number | null;
   height: number | null;
   source_type: string;
+  is_template: number;
+  template_name: string | null;
   created_at: string;
 };
 
@@ -41,6 +43,19 @@ export type StoredImageInput = {
   sourceType: string;
   width?: number | null;
   height?: number | null;
+};
+
+export type ImageTemplate = {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  messageId: string;
+  filePath: string;
+  mimeType: string;
+  sourceType: string;
+  templateName: string | null;
+  prompt: string;
+  createdAt: string;
 };
 
 const DEFAULT_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
@@ -63,6 +78,8 @@ function mapImage(row: ImageAssetRow) {
     width: row.width,
     height: row.height,
     sourceType: row.source_type,
+    isTemplate: Boolean(row.is_template),
+    templateName: row.template_name,
     createdAt: row.created_at
   };
 }
@@ -159,7 +176,7 @@ export async function getSessionById(id: string) {
   const imageRows = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
         FROM image_assets
         WHERE session_id = ?
         ORDER BY created_at ASC
@@ -313,7 +330,7 @@ function getMessageWithImages(messageId: string) {
   const imageRows = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
         FROM image_assets
         WHERE message_id = ?
         ORDER BY created_at ASC
@@ -322,6 +339,120 @@ function getMessageWithImages(messageId: string) {
     .all(messageId) as ImageAssetRow[];
 
   return mapMessage(messageRow, imageRows);
+}
+
+function getImageById(imageId: string) {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
+        FROM image_assets
+        WHERE id = ?
+      `
+    )
+    .get(imageId) as ImageAssetRow | undefined;
+
+  return row ? mapImage(row) : null;
+}
+
+export async function updateImageTemplate(args: {
+  imageId: string;
+  isTemplate: boolean;
+  templateName?: string | null;
+}) {
+  const db = getDb();
+  const existing = db
+    .prepare(
+      `
+        SELECT id
+        FROM image_assets
+        WHERE id = ?
+          AND source_type = 'generated'
+      `
+    )
+    .get(args.imageId) as { id: string } | undefined;
+
+  if (!existing) {
+    return null;
+  }
+
+  const templateName = args.isTemplate
+    ? args.templateName?.trim() || null
+    : null;
+
+  db.prepare(
+    `
+      UPDATE image_assets
+      SET is_template = ?, template_name = ?
+      WHERE id = ?
+        AND source_type = 'generated'
+    `
+  ).run(args.isTemplate ? 1 : 0, templateName, args.imageId);
+
+  return getImageById(args.imageId);
+}
+
+export async function listImageTemplates(): Promise<ImageTemplate[]> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          ia.id,
+          ia.session_id,
+          ia.message_id,
+          ia.file_path,
+          ia.mime_type,
+          ia.source_type,
+          ia.template_name,
+          ia.created_at,
+          s.title AS session_title,
+          COALESCE((
+            SELECT m.content
+            FROM messages m
+            WHERE m.session_id = ia.session_id
+              AND m.role = 'user'
+              AND m.created_at <= (
+                SELECT am.created_at
+                FROM messages am
+                WHERE am.id = ia.message_id
+              )
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ), '') AS prompt
+        FROM image_assets ia
+        JOIN sessions s ON s.id = ia.session_id
+        WHERE ia.is_template = 1
+          AND ia.source_type = 'generated'
+        ORDER BY ia.created_at DESC
+      `
+    )
+    .all() as Array<{
+      id: string;
+      session_id: string;
+      message_id: string;
+      file_path: string;
+      mime_type: string;
+      source_type: string;
+      template_name: string | null;
+      created_at: string;
+      session_title: string;
+      prompt: string;
+    }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    sessionId: row.session_id,
+    sessionTitle: row.session_title,
+    messageId: row.message_id,
+    filePath: row.file_path,
+    mimeType: row.mime_type,
+    sourceType: row.source_type,
+    templateName: row.template_name,
+    prompt: row.prompt,
+    createdAt: row.created_at
+  }));
 }
 
 export async function createPendingAssistantMessage(args: {
@@ -507,7 +638,7 @@ export async function createAssistantMessageWithImages(args: {
   const imageRows = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
         FROM image_assets
         WHERE message_id = ?
         ORDER BY created_at ASC

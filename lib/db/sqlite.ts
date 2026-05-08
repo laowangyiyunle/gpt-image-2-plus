@@ -57,6 +57,8 @@ function initializeDatabase(db: DatabaseInstance) {
       width INTEGER,
       height INTEGER,
       source_type TEXT NOT NULL,
+      is_template INTEGER NOT NULL DEFAULT 0,
+      template_name TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
@@ -73,6 +75,24 @@ function initializeDatabase(db: DatabaseInstance) {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+  `);
+
+  const imageAssetColumns = db
+    .prepare(`PRAGMA table_info(image_assets)`)
+    .all() as Array<{ name: string }>;
+  const columnNames = new Set(imageAssetColumns.map((column) => column.name));
+
+  if (!columnNames.has("is_template")) {
+    db.exec(`ALTER TABLE image_assets ADD COLUMN is_template INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!columnNames.has("template_name")) {
+    db.exec(`ALTER TABLE image_assets ADD COLUMN template_name TEXT`);
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_image_assets_template_created
+    ON image_assets(is_template, created_at);
   `);
 }
 

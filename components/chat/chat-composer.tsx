@@ -21,6 +21,7 @@ type ChatComposerProps = {
   draft?: ComposerDraft | null;
   initialPrompt?: string;
   disabled?: boolean;
+  onOpenTemplatePicker?: () => void;
   onSubmitted: (args: {
     prompt: string;
     imageFile: File | null;
@@ -35,6 +36,7 @@ export function ChatComposer({
   draft,
   initialPrompt,
   disabled = false,
+  onOpenTemplatePicker,
   onSubmitted
 }: ChatComposerProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -148,7 +150,7 @@ export function ChatComposer({
   }
 
   function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey) {
+    if (event.key !== "Enter" || event.ctrlKey) {
       return;
     }
 
@@ -248,8 +250,8 @@ export function ChatComposer({
           onKeyDown={handlePromptKeyDown}
           onPaste={handlePromptPaste}
           disabled={disabled || submitting || optimizing}
-          placeholder="请输入你想生成的图片内容，支持中文描述。按 Enter 发送，Shift + Enter 换行，也支持直接粘贴图片。"
-          rows={4}
+          placeholder="请输入你想生成的图片内容，支持中文描述。按 Enter 发送，Ctrl + Enter 换行，也支持直接粘贴图片。"
+          rows={3}
         />
       </label>
 
@@ -331,6 +333,14 @@ export function ChatComposer({
           />
           <span>{previewUrl ? "重新选择参考图" : "上传参考图"}</span>
         </label>
+        <button
+          type="button"
+          className="template-picker-open-button"
+          onClick={onOpenTemplatePicker}
+          disabled={disabled || submitting || optimizing}
+        >
+          选择模板
+        </button>
         <span className="selected-file-name">
           {selectedFileName || "未选择文件"}
         </span>

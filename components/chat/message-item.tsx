@@ -9,6 +9,7 @@ type MessageItemProps = {
   onRetry?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
   onPreviewImage?: (image: ChatImageAsset) => void;
+  onToggleTemplate?: (image: ChatImageAsset) => void;
 };
 
 export function MessageItem({
@@ -17,7 +18,8 @@ export function MessageItem({
   onReuseImage,
   onRetry,
   onDelete,
-  onPreviewImage
+  onPreviewImage,
+  onToggleTemplate
 }: MessageItemProps) {
   const isUser = message.role === "user";
   const isPending = message.status === "pending";
@@ -93,8 +95,12 @@ export function MessageItem({
                   <ChatImageActions
                     imagePath={image.filePath}
                     disabled={disabled}
+                    isTemplate={image.isTemplate}
                     onRetry={onRetry ? () => onRetry(message) : undefined}
                     onRefine={onReuseImage ? () => onReuseImage(message) : undefined}
+                    onToggleTemplate={
+                      onToggleTemplate ? () => onToggleTemplate(image) : undefined
+                    }
                   />
                 ) : (
                   <span className="message-image-tag">
