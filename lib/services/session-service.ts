@@ -1,4 +1,4 @@
-import { getDb } from "../db/sqlite.ts";
+﻿import { getDb } from "../db/sqlite.ts";
 import { createId, nowIso } from "../db/helpers.ts";
 import { removeStoredFile } from "../storage/file-storage.ts";
 import { deriveSessionTitle } from "../validations/chat.ts";
@@ -30,6 +30,7 @@ type ImageAssetRow = {
   source_type: string;
   is_template: number;
   template_name: string | null;
+  template_prompt: string | null;
   created_at: string;
 };
 
@@ -54,11 +55,13 @@ export type ImageTemplate = {
   mimeType: string;
   sourceType: string;
   templateName: string | null;
+  templatePrompt: string | null;
   prompt: string;
   createdAt: string;
 };
 
 const DEFAULT_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_SESSION_TITLE = deriveSessionTitle("");
 const STALE_PENDING_MESSAGE = "生成任务已超时，请重新提交。";
 
 function mapSession(row: SessionRow) {
@@ -80,6 +83,7 @@ function mapImage(row: ImageAssetRow) {
     sourceType: row.source_type,
     isTemplate: Boolean(row.is_template),
     templateName: row.template_name,
+    templatePrompt: row.template_prompt,
     createdAt: row.created_at
   };
 }
@@ -93,6 +97,48 @@ function mapMessage(row: MessageRow, images: ImageAssetRow[]) {
     createdAt: row.created_at,
     images: images.map(mapImage)
   };
+}
+
+function updateSessionAfterUserPrompt(args: {
+  db: ReturnType<typeof getDb>;
+  sessionId: string;
+  prompt: string;
+  updatedAt: string;
+}) {
+  const session = args.db
+    .prepare(
+      `
+        SELECT title
+        FROM sessions
+        WHERE id = ?
+      `
+    )
+    .get(args.sessionId) as { title: string } | undefined;
+
+  if (!session) {
+    return;
+  }
+
+  const messageCount = args.db
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM messages
+        WHERE session_id = ?
+      `
+    )
+    .get(args.sessionId) as { count: number };
+
+  if (messageCount.count === 0 && session.title === DEFAULT_SESSION_TITLE) {
+    args.db
+      .prepare(`UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`)
+      .run(deriveSessionTitle(args.prompt), args.updatedAt, args.sessionId);
+    return;
+  }
+
+  args.db
+    .prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`)
+    .run(args.updatedAt, args.sessionId);
 }
 
 export async function createSession(initialContent?: string) {
@@ -176,7 +222,7 @@ export async function getSessionById(id: string) {
   const imageRows = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, template_prompt, created_at
         FROM image_assets
         WHERE session_id = ?
         ORDER BY created_at ASC
@@ -205,14 +251,23 @@ export async function createUserMessage(sessionId: string, content: string) {
   const id = createId();
   const now = nowIso();
 
-  db.prepare(
-    `
-      INSERT INTO messages (id, session_id, role, content, status, created_at)
-      VALUES (?, ?, 'user', ?, 'success', ?)
-    `
-  ).run(id, sessionId, content, now);
+  const transaction = db.transaction(() => {
+    updateSessionAfterUserPrompt({
+      db,
+      sessionId,
+      prompt: content,
+      updatedAt: now
+    });
 
-  db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(now, sessionId);
+    db.prepare(
+      `
+        INSERT INTO messages (id, session_id, role, content, status, created_at)
+        VALUES (?, ?, 'user', ?, 'success', ?)
+      `
+    ).run(id, sessionId, content, now);
+  });
+
+  transaction();
 
   return {
     id,
@@ -268,6 +323,13 @@ export async function createImageGenerationMessages(args: {
   const assistantMessageId = createId();
 
   const transaction = db.transaction(() => {
+    updateSessionAfterUserPrompt({
+      db,
+      sessionId: args.sessionId,
+      prompt: args.prompt,
+      updatedAt: now
+    });
+
     db.prepare(
       `
         INSERT INTO messages (id, session_id, role, content, status, created_at)
@@ -289,11 +351,6 @@ export async function createImageGenerationMessages(args: {
       images: args.assistantImages,
       createdAt: now
     });
-
-    db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(
-      now,
-      args.sessionId
-    );
   });
 
   transaction();
@@ -330,7 +387,7 @@ function getMessageWithImages(messageId: string) {
   const imageRows = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, template_prompt, created_at
         FROM image_assets
         WHERE message_id = ?
         ORDER BY created_at ASC
@@ -346,7 +403,7 @@ function getImageById(imageId: string) {
   const row = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, template_prompt, created_at
         FROM image_assets
         WHERE id = ?
       `
@@ -360,6 +417,7 @@ export async function updateImageTemplate(args: {
   imageId: string;
   isTemplate: boolean;
   templateName?: string | null;
+  templatePrompt?: string | null;
 }) {
   const db = getDb();
   const existing = db
@@ -380,15 +438,18 @@ export async function updateImageTemplate(args: {
   const templateName = args.isTemplate
     ? args.templateName?.trim() || null
     : null;
+  const templatePrompt = args.isTemplate
+    ? args.templatePrompt?.trim() || null
+    : null;
 
   db.prepare(
     `
       UPDATE image_assets
-      SET is_template = ?, template_name = ?
+      SET is_template = ?, template_name = ?, template_prompt = ?
       WHERE id = ?
         AND source_type = 'generated'
     `
-  ).run(args.isTemplate ? 1 : 0, templateName, args.imageId);
+  ).run(args.isTemplate ? 1 : 0, templateName, templatePrompt, args.imageId);
 
   return getImageById(args.imageId);
 }
@@ -406,9 +467,10 @@ export async function listImageTemplates(): Promise<ImageTemplate[]> {
           ia.mime_type,
           ia.source_type,
           ia.template_name,
+          ia.template_prompt,
           ia.created_at,
           s.title AS session_title,
-          COALESCE((
+          COALESCE(ia.template_prompt, (
             SELECT m.content
             FROM messages m
             WHERE m.session_id = ia.session_id
@@ -436,6 +498,7 @@ export async function listImageTemplates(): Promise<ImageTemplate[]> {
       mime_type: string;
       source_type: string;
       template_name: string | null;
+      template_prompt: string | null;
       created_at: string;
       session_title: string;
       prompt: string;
@@ -450,6 +513,7 @@ export async function listImageTemplates(): Promise<ImageTemplate[]> {
     mimeType: row.mime_type,
     sourceType: row.source_type,
     templateName: row.template_name,
+    templatePrompt: row.template_prompt,
     prompt: row.prompt,
     createdAt: row.created_at
   }));
@@ -638,7 +702,7 @@ export async function createAssistantMessageWithImages(args: {
   const imageRows = db
     .prepare(
       `
-        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, created_at
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, template_prompt, created_at
         FROM image_assets
         WHERE message_id = ?
         ORDER BY created_at ASC
@@ -774,3 +838,4 @@ export async function deleteMessageById(messageId: string) {
     sessionId: message.session_id
   };
 }
+

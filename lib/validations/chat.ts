@@ -37,7 +37,8 @@ export const editImageSchema = imageRequestBaseSchema.merge(imageParamsSchema);
 
 export const updateImageTemplateSchema = z.object({
   isTemplate: z.boolean(),
-  templateName: z.string().trim().max(80).nullable().optional()
+  templateName: z.string().trim().max(80).nullable().optional(),
+  templatePrompt: z.string().trim().max(4000).nullable().optional()
 });
 
 export function deriveSessionTitle(content: string) {

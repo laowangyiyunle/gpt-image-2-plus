@@ -744,13 +744,14 @@ select:disabled {
 .template-name-dialog {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  width: min(100%, 440px);
+  width: min(100%, 520px);
+  min-width: 0;
+  max-height: min(86vh, 760px);
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
-  padding: 18px;
 }
 
 .template-name-header {
@@ -758,6 +759,13 @@ select:disabled {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+  flex: 0 0 auto;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.template-name-header > div {
+  min-width: 0;
 }
 
 .template-name-header h2 {
@@ -774,12 +782,27 @@ select:disabled {
 
 .template-name-header button,
 .template-name-actions button {
+  flex: 0 0 auto;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   padding: 8px 11px;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.template-name-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 14px 18px;
 }
 
 .template-name-preview {
@@ -795,6 +818,7 @@ select:disabled {
   display: flex;
   flex-direction: column;
   gap: 7px;
+  min-width: 0;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
@@ -810,9 +834,186 @@ select:disabled {
   outline: none;
 }
 
-.template-name-field input:focus {
+.template-name-field textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel-muted);
+  color: var(--text);
+  padding: 10px 11px;
+  outline: none;
+}
+
+.template-name-field input:focus,
+.template-name-field textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(22, 124, 128, 0.13);
+}
+
+.template-prompt-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-muted);
+  padding: 10px;
+}
+
+.template-prompt-summary > div {
+  min-width: 0;
+}
+
+.template-prompt-summary span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.template-prompt-summary p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-prompt-summary button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.template-prompt-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(23, 32, 28, 0.52);
+}
+
+.template-prompt-picker-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 620px);
+  max-height: min(82vh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.template-prompt-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex: 0 0 auto;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.template-prompt-picker-header h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.template-prompt-picker-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.template-prompt-picker-header button,
+.template-prompt-picker-actions button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.template-prompt-picker-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px;
+}
+
+.template-prompt-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.template-prompt-option input {
+  margin-top: 3px;
+  width: 14px;
+  min-width: 14px;
+}
+
+.template-prompt-option span {
+  display: -webkit-box;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.template-prompt-picker-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.template-prompt-picker-actions button:last-child {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.template-prompt-picker-actions button:last-child:hover {
+  background: var(--accent-strong);
 }
 
 .template-name-error {
@@ -823,8 +1024,12 @@ select:disabled {
 
 .template-name-actions {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 8px;
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
 }
 
 .template-name-actions button[type="submit"] {
@@ -1032,6 +1237,8 @@ select:disabled {
   border-radius: 8px;
   background: rgba(18, 20, 19, 0.58);
   touch-action: none;
+  cursor: grab;
+  user-select: none;
 }
 
 .image-preview-stage img {
@@ -1040,12 +1247,11 @@ select:disabled {
   border-radius: 8px;
   object-fit: contain;
   background: var(--panel);
-  cursor: grab;
   transform-origin: center center;
   user-select: none;
 }
 
-.image-preview-stage img:active {
+.image-preview-stage:active {
   cursor: grabbing;
   transition: none;
 }

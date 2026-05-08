@@ -19,7 +19,8 @@ export async function PATCH(
   const image = await updateImageTemplate({
     imageId: id,
     isTemplate: parsed.data.isTemplate,
-    templateName: parsed.data.templateName
+    templateName: parsed.data.templateName,
+    templatePrompt: parsed.data.templatePrompt
   });
 
   if (!image) {

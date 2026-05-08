@@ -11,7 +11,7 @@ type MessageListProps = {
   onRetry?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
   onPreviewImage?: (image: ChatImageAsset) => void;
-  onToggleTemplate?: (image: ChatImageAsset) => void;
+  onToggleTemplate?: (image: ChatImageAsset, message: ChatMessage) => void;
 };
 
 export function MessageList({

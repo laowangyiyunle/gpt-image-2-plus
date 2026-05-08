@@ -52,9 +52,27 @@ type ImageTemplatesResponse = {
   templates: ImageTemplate[];
 };
 
+type TemplatePromptOption = {
+  id: string;
+  content: string;
+  createdAt: string;
+};
+
 type TemplateNameTarget =
-  | { mode: "create"; image: ChatImageAsset }
-  | { mode: "rename"; image: ImageTemplate };
+  | {
+      mode: "create";
+      image: ChatImageAsset;
+      promptOptions: TemplatePromptOption[];
+      selectedPromptIds: string[];
+      initialPrompt: string;
+    }
+  | {
+      mode: "rename";
+      image: ImageTemplate;
+      promptOptions: TemplatePromptOption[];
+      selectedPromptIds: string[];
+      initialPrompt: string;
+    };
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
@@ -345,6 +363,19 @@ export function ChatShell() {
     return null;
   }
 
+  function getTemplatePromptOptions(targetMessageId: string) {
+    const targetIndex = messages.findIndex((message) => message.id === targetMessageId);
+    const scopedMessages = targetIndex >= 0 ? messages.slice(0, targetIndex) : messages;
+
+    return scopedMessages
+      .filter((message) => message.role === "user" && message.content.trim())
+      .map((message) => ({
+        id: message.id,
+        content: message.content,
+        createdAt: message.createdAt
+      }));
+  }
+
   async function handleReuseImage(message: ChatMessage) {
     const generatedImage = message.images.find(
       (image) => image.sourceType === "generated"
@@ -367,6 +398,7 @@ export function ChatShell() {
     image: Pick<ChatImageAsset | ImageTemplate, "id">;
     isTemplate: boolean;
     templateName?: string | null;
+    templatePrompt?: string | null;
   }) {
     await fetchJson<{ image: ChatImageAsset }>(
       `/api/images/templates/${args.image.id}`,
@@ -377,7 +409,8 @@ export function ChatShell() {
         },
         body: JSON.stringify({
           isTemplate: args.isTemplate,
-          templateName: args.templateName
+          templateName: args.templateName,
+          templatePrompt: args.templatePrompt
         })
       }
     );
@@ -391,21 +424,36 @@ export function ChatShell() {
     }
   }
 
-  async function handleToggleTemplate(image: ChatImageAsset) {
+  async function handleToggleTemplate(image: ChatImageAsset, message: ChatMessage) {
     if (!image.isTemplate) {
+      const promptOptions = getTemplatePromptOptions(message.id);
+      const previousUserMessage = findPreviousUserMessage(message.id);
+      const selectedPromptIds = previousUserMessage ? [previousUserMessage.id] : [];
+      const initialPrompt = previousUserMessage?.content ?? "";
+
       setTemplateNameError("");
-      setTemplateNameTarget({ mode: "create", image });
+      setTemplateNameTarget({
+        mode: "create",
+        image,
+        promptOptions,
+        selectedPromptIds,
+        initialPrompt
+      });
       return;
     }
 
     await saveImageTemplate({
       image,
       isTemplate: false,
-      templateName: null
+      templateName: null,
+      templatePrompt: null
     });
   }
 
-  async function handleCreateTemplate(templateName: string) {
+  async function handleCreateTemplate(args: {
+    templateName: string;
+    templatePrompt: string;
+  }) {
     if (!templateNameTarget) {
       return;
     }
@@ -416,7 +464,8 @@ export function ChatShell() {
       await saveImageTemplate({
         image: templateNameTarget.image,
         isTemplate: true,
-        templateName
+        templateName: args.templateName,
+        templatePrompt: args.templatePrompt
       });
       setTemplateNameTarget(null);
     } catch (error) {
@@ -433,7 +482,7 @@ export function ChatShell() {
     setComposerDraft({
       file: imageFile,
       focus: true,
-      prompt: "",
+      prompt: template.prompt || "",
       version: Date.now()
     });
     setIsTemplatePickerOpen(false);
@@ -448,7 +497,13 @@ export function ChatShell() {
 
   function handleRenameTemplate(template: ImageTemplate) {
     setTemplateNameError("");
-    setTemplateNameTarget({ mode: "rename", image: template });
+    setTemplateNameTarget({
+      mode: "rename",
+      image: template,
+      promptOptions: [],
+      selectedPromptIds: [],
+      initialPrompt: template.prompt || ""
+    });
   }
 
   async function handleRetry(message: ChatMessage) {
@@ -552,8 +607,8 @@ export function ChatShell() {
                 alt: image.sourceType === "uploaded" ? "参考图" : "生成结果"
               });
             }}
-            onToggleTemplate={(image) => {
-              void runAction(() => handleToggleTemplate(image));
+            onToggleTemplate={(image, message) => {
+              void runAction(() => handleToggleTemplate(image, message));
             }}
           />
 
@@ -632,13 +687,16 @@ export function ChatShell() {
       {templateNameTarget ? (
         <ImageTemplateNameDialog
           image={templateNameTarget.image}
+          initialPrompt={templateNameTarget.initialPrompt}
+          promptOptions={templateNameTarget.promptOptions}
+          selectedPromptIds={templateNameTarget.selectedPromptIds}
           title={
             templateNameTarget.mode === "rename" ? "重命名模板" : "设为模板"
           }
           description={
             templateNameTarget.mode === "rename"
               ? "修改模板名称，不会影响原图和会话内容。"
-              : "给这张生成图起一个名字，后续可以在输入区选择使用。"
+              : "给这张生成图起一个名字，并选择下次复用时带入的提示词。"
           }
           submitLabel={
             templateNameTarget.mode === "rename" ? "保存名称" : "保存模板"
@@ -650,8 +708,8 @@ export function ChatShell() {
               setTemplateNameTarget(null);
             }
           }}
-          onSubmit={(templateName) => {
-            void handleCreateTemplate(templateName);
+          onSubmit={(args) => {
+            void handleCreateTemplate(args);
           }}
         />
       ) : null}

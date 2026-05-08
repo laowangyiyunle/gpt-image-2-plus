@@ -9,7 +9,7 @@ type MessageItemProps = {
   onRetry?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
   onPreviewImage?: (image: ChatImageAsset) => void;
-  onToggleTemplate?: (image: ChatImageAsset) => void;
+  onToggleTemplate?: (image: ChatImageAsset, message: ChatMessage) => void;
 };
 
 export function MessageItem({
@@ -99,7 +99,7 @@ export function MessageItem({
                     onRetry={onRetry ? () => onRetry(message) : undefined}
                     onRefine={onReuseImage ? () => onReuseImage(message) : undefined}
                     onToggleTemplate={
-                      onToggleTemplate ? () => onToggleTemplate(image) : undefined
+                      onToggleTemplate ? () => onToggleTemplate(image, message) : undefined
                     }
                   />
                 ) : (

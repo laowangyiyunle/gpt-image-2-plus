@@ -59,6 +59,7 @@ function initializeDatabase(db: DatabaseInstance) {
       source_type TEXT NOT NULL,
       is_template INTEGER NOT NULL DEFAULT 0,
       template_name TEXT,
+      template_prompt TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
@@ -88,6 +89,10 @@ function initializeDatabase(db: DatabaseInstance) {
 
   if (!columnNames.has("template_name")) {
     db.exec(`ALTER TABLE image_assets ADD COLUMN template_name TEXT`);
+  }
+
+  if (!columnNames.has("template_prompt")) {
+    db.exec(`ALTER TABLE image_assets ADD COLUMN template_prompt TEXT`);
   }
 
   db.exec(`

@@ -6,6 +6,7 @@ export type ChatImageAsset = {
   isPending?: boolean;
   isTemplate?: boolean;
   templateName?: string | null;
+  templatePrompt?: string | null;
 };
 
 export type ImageTemplate = {

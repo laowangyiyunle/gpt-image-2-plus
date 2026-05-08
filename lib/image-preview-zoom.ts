@@ -1,5 +1,6 @@
 export const MIN_PREVIEW_SCALE = 0.5;
 export const MAX_PREVIEW_SCALE = 5;
+export const MAX_NATURAL_PREVIEW_SCALE = 3;
 export const DEFAULT_PREVIEW_SCALE = 1;
 export const DOUBLE_CLICK_PREVIEW_SCALE = 2;
 
@@ -13,12 +14,45 @@ export type PreviewZoomState = {
   offset: PreviewPoint;
 };
 
-export function clampPreviewScale(scale: number) {
+export type PreviewSize = {
+  width: number;
+  height: number;
+};
+
+export function getFitPreviewScale(args: {
+  image: PreviewSize;
+  stage: PreviewSize;
+}) {
+  if (
+    args.image.width <= 0 ||
+    args.image.height <= 0 ||
+    args.stage.width <= 0 ||
+    args.stage.height <= 0
+  ) {
+    return DEFAULT_PREVIEW_SCALE;
+  }
+
+  return Math.min(
+    DEFAULT_PREVIEW_SCALE,
+    args.stage.width / args.image.width,
+    args.stage.height / args.image.height
+  );
+}
+
+export function getMaxPreviewScale(fitScale: number) {
+  if (!Number.isFinite(fitScale) || fitScale <= 0) {
+    return MAX_PREVIEW_SCALE;
+  }
+
+  return Math.max(MAX_PREVIEW_SCALE, MAX_NATURAL_PREVIEW_SCALE / fitScale);
+}
+
+export function clampPreviewScale(scale: number, maxScale = MAX_PREVIEW_SCALE) {
   if (!Number.isFinite(scale)) {
     return DEFAULT_PREVIEW_SCALE;
   }
 
-  return Math.min(MAX_PREVIEW_SCALE, Math.max(MIN_PREVIEW_SCALE, scale));
+  return Math.min(maxScale, Math.max(MIN_PREVIEW_SCALE, scale));
 }
 
 export function getNextDoubleClickScale(currentScale: number) {
@@ -28,10 +62,10 @@ export function getNextDoubleClickScale(currentScale: number) {
 }
 
 export function getWheelScale(currentScale: number, deltaY: number) {
-  const step = deltaY < 0 ? 0.15 : -0.15;
-  const nextScale = Math.round((currentScale + step) * 100) / 100;
+  const multiplier = deltaY < 0 ? 1.18 : 1 / 1.18;
+  const nextScale = Math.round(currentScale * multiplier * 100) / 100;
 
-  return clampPreviewScale(nextScale);
+  return nextScale;
 }
 
 export function getZoomStateAtPoint(args: {
@@ -39,8 +73,9 @@ export function getZoomStateAtPoint(args: {
   nextScale: number;
   offset: PreviewPoint;
   pointer: PreviewPoint;
+  maxScale?: number;
 }) {
-  const nextScale = clampPreviewScale(args.nextScale);
+  const nextScale = clampPreviewScale(args.nextScale, args.maxScale);
   const ratio = nextScale / args.scale;
 
   if (!Number.isFinite(ratio) || ratio <= 0) {
@@ -67,11 +102,30 @@ export function getWheelZoomState(args: {
   offset: PreviewPoint;
   pointer: PreviewPoint;
   deltaY: number;
+  maxScale?: number;
 }) {
   return getZoomStateAtPoint({
     scale: args.scale,
     nextScale: getWheelScale(args.scale, args.deltaY),
     offset: args.offset,
-    pointer: args.pointer
+    pointer: args.pointer,
+    maxScale: args.maxScale
   });
+}
+
+export function clampPreviewOffset(args: {
+  offset: PreviewPoint;
+  scale: number;
+  baseSize: PreviewSize;
+  stageSize: PreviewSize;
+}) {
+  const scaledWidth = args.baseSize.width * args.scale;
+  const scaledHeight = args.baseSize.height * args.scale;
+  const maxX = Math.max(0, (scaledWidth - args.stageSize.width) / 2);
+  const maxY = Math.max(0, (scaledHeight - args.stageSize.height) / 2);
+
+  return {
+    x: Math.min(maxX, Math.max(-maxX, args.offset.x)),
+    y: Math.min(maxY, Math.max(-maxY, args.offset.y))
+  };
 }

@@ -40,7 +40,8 @@ const generatedImage = completed.images[0];
 await updateImageTemplate({
   imageId: generatedImage.id,
   isTemplate: true,
-  templateName: "海报模板"
+  templateName: "海报模板",
+  templatePrompt: "自定义模板提示词"
 });
 
 let templates = await listImageTemplates();
@@ -48,10 +49,13 @@ let templates = await listImageTemplates();
 assert.equal(templates.length, 1);
 assert.equal(templates[0].id, generatedImage.id);
 assert.equal(templates[0].templateName, "海报模板");
+assert.equal(templates[0].templatePrompt, "自定义模板提示词");
+assert.equal(templates[0].prompt, "自定义模板提示词");
 assert.equal(templates[0].sessionTitle, "模板测试提示词");
 
 let hydrated = await getSessionById(session.id);
 assert.equal(hydrated?.messages[0].images[0].isTemplate, true);
+assert.equal(hydrated?.messages[0].images[0].templatePrompt, "自定义模板提示词");
 
 await updateImageTemplate({
   imageId: generatedImage.id,
