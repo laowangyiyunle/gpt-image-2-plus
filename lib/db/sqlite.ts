@@ -71,6 +71,27 @@ function initializeDatabase(db: DatabaseInstance) {
     CREATE INDEX IF NOT EXISTS idx_image_assets_message
     ON image_assets(message_id);
 
+    CREATE TABLE IF NOT EXISTS image_templates (
+      id TEXT PRIMARY KEY,
+      source_image_id TEXT,
+      source_session_id TEXT,
+      source_message_id TEXT,
+      session_title TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      template_name TEXT,
+      template_prompt TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_image_templates_created
+    ON image_templates(created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_image_templates_file_path
+    ON image_templates(file_path);
+
     CREATE TABLE IF NOT EXISTS runtime_config (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -98,6 +119,65 @@ function initializeDatabase(db: DatabaseInstance) {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_image_assets_template_created
     ON image_assets(is_template, created_at);
+
+    INSERT OR IGNORE INTO image_templates (
+      id,
+      source_image_id,
+      source_session_id,
+      source_message_id,
+      session_title,
+      file_path,
+      mime_type,
+      source_type,
+      template_name,
+      template_prompt,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ia.id,
+      ia.id,
+      ia.session_id,
+      ia.message_id,
+      s.title,
+      ia.file_path,
+      ia.mime_type,
+      ia.source_type,
+      ia.template_name,
+      COALESCE(ia.template_prompt, (
+        SELECT m.content
+        FROM messages m
+        WHERE m.session_id = ia.session_id
+          AND m.role = 'user'
+          AND m.created_at <= am.created_at
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      )),
+      ia.created_at,
+      ia.created_at
+    FROM image_assets ia
+    JOIN sessions s ON s.id = ia.session_id
+    JOIN messages am ON am.id = ia.message_id
+    WHERE ia.is_template = 1
+      AND ia.source_type = 'generated';
+
+    UPDATE image_templates
+    SET template_prompt = (
+      SELECT m.content
+      FROM messages m
+      JOIN messages am ON am.id = image_templates.source_message_id
+      WHERE m.session_id = image_templates.source_session_id
+        AND m.role = 'user'
+        AND m.created_at <= am.created_at
+      ORDER BY m.created_at DESC
+      LIMIT 1
+    )
+    WHERE template_prompt IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM messages am
+        WHERE am.id = image_templates.source_message_id
+      );
   `);
 }
 

@@ -181,6 +181,10 @@ export function ChatShell() {
   }
 
   async function createNewSession() {
+    if (activeSessionId && messages.length === 0) {
+      return;
+    }
+
     const data = await fetchJson<{ session: ChatSession }>("/api/chat/sessions", {
       method: "POST",
       headers: {
@@ -506,6 +510,23 @@ export function ChatShell() {
     });
   }
 
+  async function handleDeleteTemplate(template: ImageTemplate) {
+    const confirmed = window.confirm(
+      `确定删除模板「${template.templateName || template.sessionTitle}」吗？\n\n这只会从模板库移除，不会删除原聊天里的图片。`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await saveImageTemplate({
+      image: template,
+      isTemplate: false,
+      templateName: null,
+      templatePrompt: null
+    });
+  }
+
   async function handleRetry(message: ChatMessage) {
     const previousUserMessage = findPreviousUserMessage(message.id);
 
@@ -678,6 +699,9 @@ export function ChatShell() {
           onRefresh={() => void loadTemplates()}
           onPreview={handlePreviewTemplate}
           onRename={handleRenameTemplate}
+          onDelete={(template) => {
+            void runAction(() => handleDeleteTemplate(template));
+          }}
           onSelect={(template) => {
             void runAction(() => handleSelectTemplate(template));
           }}

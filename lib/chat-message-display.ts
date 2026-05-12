@@ -29,6 +29,12 @@ export function formatMessageCreatedAt(createdAt: string) {
   }).format(date);
 }
 
+export function canRetryFailedMessage(
+  message: Pick<ChatMessage, "role" | "status">
+) {
+  return message.role === "assistant" && message.status === "failed";
+}
+
 export function withRecoverablePendingProgressAt(
   messages: ChatMessage[],
   nowMs = Date.now()

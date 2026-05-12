@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  canRetryFailedMessage,
   getElapsedSecondsAt,
   withRecoverablePendingProgressAt
 } from "../lib/chat-message-display.ts";
@@ -42,3 +43,27 @@ const [secondTick] = withRecoverablePendingProgressAt(
 
 assert.equal(firstTick.progress?.elapsedSeconds, 1);
 assert.equal(secondTick.progress?.elapsedSeconds, 2);
+
+assert.equal(
+  canRetryFailedMessage({
+    role: "assistant",
+    status: "failed"
+  }),
+  true
+);
+
+assert.equal(
+  canRetryFailedMessage({
+    role: "assistant",
+    status: "pending"
+  }),
+  false
+);
+
+assert.equal(
+  canRetryFailedMessage({
+    role: "user",
+    status: "failed"
+  }),
+  false
+);

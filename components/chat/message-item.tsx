@@ -1,5 +1,8 @@
 import { ChatImageActions } from "@/components/chat/chat-image-actions";
-import { formatMessageCreatedAt } from "@/lib/chat-message-display";
+import {
+  canRetryFailedMessage,
+  formatMessageCreatedAt
+} from "@/lib/chat-message-display";
 import type { ChatImageAsset, ChatMessage } from "@/lib/types/chat";
 
 type MessageItemProps = {
@@ -23,6 +26,7 @@ export function MessageItem({
 }: MessageItemProps) {
   const isUser = message.role === "user";
   const isPending = message.status === "pending";
+  const canRetryFailed = canRetryFailedMessage(message) && Boolean(onRetry);
   const createdAtLabel = formatMessageCreatedAt(message.createdAt);
 
   return (
@@ -69,6 +73,17 @@ export function MessageItem({
                 style={{ width: `${message.progress.percent}%` }}
               />
             </div>
+          </div>
+        ) : null}
+        {canRetryFailed ? (
+          <div className="message-failed-actions">
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onRetry?.(message)}
+            >
+              重试
+            </button>
           </div>
         ) : null}
         {!isPending ? message.images.map((image) => (

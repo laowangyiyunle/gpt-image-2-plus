@@ -17,7 +17,7 @@ export function getInitialGenerationProgress({
 
   return {
     percent: 10,
-    label: hasReferenceImage ? "等待参考图预览" : "等待首张预览图",
+    label: hasReferenceImage ? "等待生成预览" : "等待首张预览图",
     elapsedSeconds: safeElapsedSeconds
   };
 }

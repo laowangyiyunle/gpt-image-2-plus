@@ -110,6 +110,7 @@ select:disabled {
 
 .session-sidebar-header button,
 .composer-actions-row button,
+.message-failed-actions button,
 .message-image-actions button,
 .message-image-actions a,
 .settings-actions button,
@@ -130,6 +131,7 @@ select:disabled {
 
 .session-sidebar-header button:hover,
 .composer-actions-row button:hover,
+.message-failed-actions button:hover,
 .message-image-actions button:hover,
 .message-image-actions a:hover,
 .settings-actions button:hover,
@@ -366,6 +368,17 @@ select:disabled {
   border-radius: inherit;
   background: var(--accent);
   transition: width 420ms ease;
+}
+
+.message-failed-actions {
+  display: flex;
+  margin-top: 12px;
+}
+
+.message-failed-actions button {
+  padding: 8px 12px;
+  background: var(--accent);
+  font-size: 13px;
 }
 
 .message-meta {
@@ -1133,16 +1146,14 @@ select:disabled {
 }
 
 .template-picker-card-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   margin-top: 2px;
 }
 
 .template-picker-card-actions button {
-  flex: 0 0 auto;
-  min-width: 44px;
+  min-width: 0;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--panel);
@@ -1169,6 +1180,18 @@ select:disabled {
 .template-picker-card-actions button:first-child:hover {
   background: var(--accent-strong);
   color: #fff;
+}
+
+.template-picker-card-actions .template-picker-delete-button {
+  border-color: rgba(180, 35, 24, 0.22);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.template-picker-card-actions .template-picker-delete-button:hover {
+  border-color: rgba(180, 35, 24, 0.34);
+  background: #ffe1dd;
+  color: var(--danger);
 }
 
 .template-picker-card-title,

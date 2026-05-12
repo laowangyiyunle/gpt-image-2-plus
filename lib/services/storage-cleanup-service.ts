@@ -34,7 +34,22 @@ async function listStoredPublicPaths() {
 function listReferencedPublicPaths() {
   const db = getDb();
   const rows = db
-    .prepare(`SELECT file_path FROM image_assets`)
+    .prepare(
+      `
+        SELECT file_path FROM image_assets
+        UNION
+        SELECT file_path FROM image_templates
+      `
+    )
+    .all() as Array<{ file_path: string }>;
+
+  return new Set(rows.map((row) => row.file_path));
+}
+
+function listTemplatePublicPaths() {
+  const db = getDb();
+  const rows = db
+    .prepare(`SELECT file_path FROM image_templates`)
     .all() as Array<{ file_path: string }>;
 
   return new Set(rows.map((row) => row.file_path));
@@ -74,14 +89,16 @@ export async function cleanupOrphanFiles() {
 export async function clearAllHistoryAndFiles() {
   const db = getDb();
   const storedPaths = await listStoredPublicPaths();
+  const templatePaths = listTemplatePublicPaths();
+  const removablePaths = storedPaths.filter(
+    (filePath) => !templatePaths.has(filePath)
+  );
 
   db.prepare(`DELETE FROM sessions`).run();
-  await removePublicPaths(storedPaths);
+  await removePublicPaths(removablePaths);
 
   return {
-    removedFiles: storedPaths.length,
-    storedFiles: 0,
-    referencedFiles: 0,
-    orphanFiles: 0
+    removedFiles: removablePaths.length,
+    ...(await getStorageCleanupStats())
   };
 }

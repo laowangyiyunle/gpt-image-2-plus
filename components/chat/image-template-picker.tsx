@@ -11,6 +11,7 @@ type ImageTemplatePickerProps = {
   onRefresh: () => void;
   onPreview: (template: ImageTemplate) => void;
   onRename: (template: ImageTemplate) => void;
+  onDelete: (template: ImageTemplate) => void;
   onSelect: (template: ImageTemplate) => void;
 };
 
@@ -22,6 +23,7 @@ export function ImageTemplatePicker({
   onRefresh,
   onPreview,
   onRename,
+  onDelete,
   onSelect
 }: ImageTemplatePickerProps) {
   return (
@@ -88,7 +90,14 @@ export function ImageTemplatePicker({
                     预览
                   </button>
                   <button type="button" onClick={() => onRename(template)}>
-                    重命名
+                    改名
+                  </button>
+                  <button
+                    type="button"
+                    className="template-picker-delete-button"
+                    onClick={() => onDelete(template)}
+                  >
+                    删除
                   </button>
                 </div>
               </article>

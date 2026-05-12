@@ -18,6 +18,7 @@ export type ImageTemplate = {
   mimeType: string;
   sourceType: string;
   templateName: string | null;
+  templatePrompt?: string | null;
   prompt: string;
   createdAt: string;
 };

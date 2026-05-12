@@ -38,6 +38,34 @@ type SessionListRow = SessionRow & {
   last_message_content: string | null;
 };
 
+type ImageTemplateRow = {
+  id: string;
+  source_image_id: string | null;
+  source_session_id: string | null;
+  source_message_id: string | null;
+  session_title: string;
+  file_path: string;
+  mime_type: string;
+  source_type: string;
+  template_name: string | null;
+  template_prompt: string | null;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type TemplateSourceRow = {
+  id: string;
+  session_id: string;
+  message_id: string;
+  file_path: string;
+  mime_type: string;
+  source_type: string;
+  created_at: string;
+  session_title: string;
+  prompt: string;
+};
+
 export type StoredImageInput = {
   filePath: string;
   mimeType: string;
@@ -413,6 +441,102 @@ function getImageById(imageId: string) {
   return row ? mapImage(row) : null;
 }
 
+function normalizeOptionalText(value: string | null | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value?.trim() || null;
+}
+
+function getImageTemplateRow(
+  db: ReturnType<typeof getDb>,
+  templateId: string
+) {
+  return db
+    .prepare(
+      `
+        SELECT
+          it.id,
+          it.source_image_id,
+          it.source_session_id,
+          it.source_message_id,
+          it.session_title,
+          it.file_path,
+          it.mime_type,
+          it.source_type,
+          it.template_name,
+          it.template_prompt,
+          COALESCE(it.template_prompt, (
+            SELECT m.content
+            FROM messages m
+            WHERE m.session_id = it.source_session_id
+              AND m.role = 'user'
+              AND m.created_at <= COALESCE(am.created_at, it.created_at)
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ), '') AS prompt,
+          it.created_at,
+          it.updated_at
+        FROM image_templates it
+        LEFT JOIN messages am ON am.id = it.source_message_id
+        WHERE it.id = ?
+      `
+    )
+    .get(templateId) as ImageTemplateRow | undefined;
+}
+
+function getGeneratedTemplateSource(
+  db: ReturnType<typeof getDb>,
+  imageId: string
+) {
+  return db
+    .prepare(
+      `
+        SELECT
+          ia.id,
+          ia.session_id,
+          ia.message_id,
+          ia.file_path,
+          ia.mime_type,
+          ia.source_type,
+          ia.created_at,
+          s.title AS session_title,
+          COALESCE(ia.template_prompt, (
+            SELECT m.content
+            FROM messages m
+            WHERE m.session_id = ia.session_id
+              AND m.role = 'user'
+              AND m.created_at <= am.created_at
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ), '') AS prompt
+        FROM image_assets ia
+        JOIN sessions s ON s.id = ia.session_id
+        JOIN messages am ON am.id = ia.message_id
+        WHERE ia.id = ?
+          AND ia.source_type = 'generated'
+      `
+    )
+    .get(imageId) as TemplateSourceRow | undefined;
+}
+
+function mapTemplate(row: ImageTemplateRow): ImageTemplate {
+  return {
+    id: row.id,
+    sessionId: row.source_session_id ?? "",
+    sessionTitle: row.session_title,
+    messageId: row.source_message_id ?? "",
+    filePath: row.file_path,
+    mimeType: row.mime_type,
+    sourceType: row.source_type,
+    templateName: row.template_name,
+    templatePrompt: row.template_prompt,
+    prompt: row.prompt,
+    createdAt: row.created_at
+  };
+}
+
 export async function updateImageTemplate(args: {
   imageId: string;
   isTemplate: boolean;
@@ -420,36 +544,125 @@ export async function updateImageTemplate(args: {
   templatePrompt?: string | null;
 }) {
   const db = getDb();
-  const existing = db
-    .prepare(
+  const existingTemplate = getImageTemplateRow(db, args.imageId);
+  const source = getGeneratedTemplateSource(db, args.imageId);
+  const nextTemplateName = normalizeOptionalText(args.templateName);
+  const nextTemplatePrompt = normalizeOptionalText(args.templatePrompt);
+
+  if (!args.isTemplate) {
+    if (!existingTemplate && !source) {
+      return null;
+    }
+
+    const transaction = db.transaction(() => {
+      db.prepare(`DELETE FROM image_templates WHERE id = ?`).run(args.imageId);
+      db.prepare(
+        `
+          UPDATE image_assets
+          SET is_template = 0, template_name = NULL, template_prompt = NULL
+          WHERE id = ?
+        `
+      ).run(args.imageId);
+    });
+
+    transaction();
+
+    return (
+      getImageById(args.imageId) ??
+      (existingTemplate ? mapTemplate(existingTemplate) : null)
+    );
+  }
+
+  const templateName =
+    nextTemplateName === undefined
+      ? existingTemplate?.template_name ?? null
+      : nextTemplateName;
+
+  if (!source) {
+    if (!existingTemplate) {
+      return null;
+    }
+
+    const templatePrompt =
+      nextTemplatePrompt === undefined
+        ? existingTemplate.template_prompt
+        : nextTemplatePrompt;
+    const updatedAt = nowIso();
+
+    db.prepare(
       `
-        SELECT id
-        FROM image_assets
+        UPDATE image_templates
+        SET template_name = ?, template_prompt = ?, updated_at = ?
+        WHERE id = ?
+      `
+    ).run(templateName, templatePrompt, updatedAt, args.imageId);
+
+    const updatedTemplate = getImageTemplateRow(db, args.imageId);
+    return updatedTemplate ? mapTemplate(updatedTemplate) : null;
+  }
+
+  const templatePrompt =
+    nextTemplatePrompt === undefined
+      ? existingTemplate?.template_prompt ?? (source.prompt || null)
+      : nextTemplatePrompt;
+  const updatedAt = nowIso();
+
+  const transaction = db.transaction(() => {
+    db.prepare(
+      `
+        INSERT INTO image_templates (
+          id,
+          source_image_id,
+          source_session_id,
+          source_message_id,
+          session_title,
+          file_path,
+          mime_type,
+          source_type,
+          template_name,
+          template_prompt,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          source_image_id = excluded.source_image_id,
+          source_session_id = excluded.source_session_id,
+          source_message_id = excluded.source_message_id,
+          session_title = excluded.session_title,
+          file_path = excluded.file_path,
+          mime_type = excluded.mime_type,
+          source_type = excluded.source_type,
+          template_name = excluded.template_name,
+          template_prompt = excluded.template_prompt,
+          updated_at = excluded.updated_at
+      `
+    ).run(
+      source.id,
+      source.id,
+      source.session_id,
+      source.message_id,
+      source.session_title,
+      source.file_path,
+      source.mime_type,
+      source.source_type,
+      templateName,
+      templatePrompt,
+      existingTemplate?.created_at ?? source.created_at,
+      updatedAt
+    );
+
+    db.prepare(
+      `
+        UPDATE image_assets
+        SET is_template = 1, template_name = ?, template_prompt = ?
         WHERE id = ?
           AND source_type = 'generated'
       `
-    )
-    .get(args.imageId) as { id: string } | undefined;
+    ).run(templateName, templatePrompt, args.imageId);
+  });
 
-  if (!existing) {
-    return null;
-  }
-
-  const templateName = args.isTemplate
-    ? args.templateName?.trim() || null
-    : null;
-  const templatePrompt = args.isTemplate
-    ? args.templatePrompt?.trim() || null
-    : null;
-
-  db.prepare(
-    `
-      UPDATE image_assets
-      SET is_template = ?, template_name = ?, template_prompt = ?
-      WHERE id = ?
-        AND source_type = 'generated'
-    `
-  ).run(args.isTemplate ? 1 : 0, templateName, templatePrompt, args.imageId);
+  transaction();
 
   return getImageById(args.imageId);
 }
@@ -460,63 +673,35 @@ export async function listImageTemplates(): Promise<ImageTemplate[]> {
     .prepare(
       `
         SELECT
-          ia.id,
-          ia.session_id,
-          ia.message_id,
-          ia.file_path,
-          ia.mime_type,
-          ia.source_type,
-          ia.template_name,
-          ia.template_prompt,
-          ia.created_at,
-          s.title AS session_title,
-          COALESCE(ia.template_prompt, (
+          it.id,
+          it.source_image_id,
+          it.source_session_id,
+          it.source_message_id,
+          it.session_title,
+          it.file_path,
+          it.mime_type,
+          it.source_type,
+          it.template_name,
+          it.template_prompt,
+          COALESCE(it.template_prompt, (
             SELECT m.content
             FROM messages m
-            WHERE m.session_id = ia.session_id
+            WHERE m.session_id = it.source_session_id
               AND m.role = 'user'
-              AND m.created_at <= (
-                SELECT am.created_at
-                FROM messages am
-                WHERE am.id = ia.message_id
-              )
+              AND m.created_at <= COALESCE(am.created_at, it.created_at)
             ORDER BY m.created_at DESC
             LIMIT 1
-          ), '') AS prompt
-        FROM image_assets ia
-        JOIN sessions s ON s.id = ia.session_id
-        WHERE ia.is_template = 1
-          AND ia.source_type = 'generated'
-        ORDER BY ia.created_at DESC
+          ), '') AS prompt,
+          it.created_at,
+          it.updated_at
+        FROM image_templates it
+        LEFT JOIN messages am ON am.id = it.source_message_id
+        ORDER BY it.created_at DESC
       `
     )
-    .all() as Array<{
-      id: string;
-      session_id: string;
-      message_id: string;
-      file_path: string;
-      mime_type: string;
-      source_type: string;
-      template_name: string | null;
-      template_prompt: string | null;
-      created_at: string;
-      session_title: string;
-      prompt: string;
-    }>;
+    .all() as ImageTemplateRow[];
 
-  return rows.map((row) => ({
-    id: row.id,
-    sessionId: row.session_id,
-    sessionTitle: row.session_title,
-    messageId: row.message_id,
-    filePath: row.file_path,
-    mimeType: row.mime_type,
-    sourceType: row.source_type,
-    templateName: row.template_name,
-    templatePrompt: row.template_prompt,
-    prompt: row.prompt,
-    createdAt: row.created_at
-  }));
+  return rows.map(mapTemplate);
 }
 
 export async function createPendingAssistantMessage(args: {
@@ -725,9 +910,20 @@ function getSessionImagePaths(sessionId: string) {
   const rows = db
     .prepare(
       `
-        SELECT file_path
-        FROM image_assets
-        WHERE session_id = ?
+        SELECT DISTINCT ia.file_path
+        FROM image_assets ia
+        WHERE ia.session_id = ?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM image_templates it
+            WHERE it.file_path = ia.file_path
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM image_assets other
+            WHERE other.file_path = ia.file_path
+              AND other.session_id <> ia.session_id
+          )
       `
     )
     .all(sessionId) as Array<{ file_path: string }>;
@@ -740,9 +936,20 @@ function getMessageImagePaths(messageId: string) {
   const rows = db
     .prepare(
       `
-        SELECT file_path
-        FROM image_assets
-        WHERE message_id = ?
+        SELECT DISTINCT ia.file_path
+        FROM image_assets ia
+        WHERE ia.message_id = ?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM image_templates it
+            WHERE it.file_path = ia.file_path
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM image_assets other
+            WHERE other.file_path = ia.file_path
+              AND other.message_id <> ia.message_id
+          )
       `
     )
     .all(messageId) as Array<{ file_path: string }>;

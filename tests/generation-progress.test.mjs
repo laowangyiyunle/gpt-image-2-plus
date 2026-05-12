@@ -15,6 +15,15 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  getInitialGenerationProgress({ elapsedSeconds: 2, hasReferenceImage: true }),
+  {
+    percent: 10,
+    label: "等待生成预览",
+    elapsedSeconds: 2
+  }
+);
+
+assert.deepEqual(
   getPartialImageProgress({ partialImageIndex: 0, elapsedSeconds: 16 }),
   {
     percent: 45,
