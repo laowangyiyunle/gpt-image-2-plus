@@ -7,11 +7,13 @@ import {
 } from "@/components/chat/chat-composer";
 import { ImageTemplateNameDialog } from "@/components/chat/image-template-name-dialog";
 import { ImagePreviewModal } from "@/components/chat/image-preview-modal";
+import { ImageResultGallery } from "@/components/chat/image-result-gallery";
 import { ImageTemplatePicker } from "@/components/chat/image-template-picker";
 import { MessageList } from "@/components/chat/message-list";
 import { SessionSidebar } from "@/components/history/session-sidebar";
 import { OpenAIKeySettings } from "@/components/settings/openai-key-settings";
 import { withRecoverablePendingProgressAt } from "@/lib/chat-message-display";
+import { getImageResultGalleryItems } from "@/lib/gallery-results";
 import type {
   ChatImageAsset,
   ChatMessage,
@@ -130,12 +132,17 @@ export function ChatShell() {
   const [templatePickerError, setTemplatePickerError] = useState("");
   const [isSavingTemplateName, setIsSavingTemplateName] = useState(false);
   const [templateNameError, setTemplateNameError] = useState("");
+  const [isRecordDrawerOpen, setIsRecordDrawerOpen] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const hasPendingMessages = messages.some((message) => message.status === "pending");
   const isComposerDisabled = isSubmittingJob || hasPendingMessages;
   const displayMessages = useMemo(
     () => withRecoverablePendingProgressAt(messages, nowMs),
     [messages, nowMs]
+  );
+  const galleryItems = useMemo(
+    () => getImageResultGalleryItems(displayMessages),
+    [displayMessages]
   );
 
   async function loadSessions(selectLatest = false) {
@@ -565,12 +572,12 @@ export function ChatShell() {
 
   const activeTitle = useMemo(() => {
     if (!activeSessionId) {
-      return "图片生成助手";
+      return "图片创作台";
     }
 
     return (
       sessions.find((session) => session.id === activeSessionId)?.title ??
-      "图片生成助手"
+      "图片创作台"
     );
   }, [activeSessionId, sessions]);
 
@@ -597,7 +604,7 @@ export function ChatShell() {
           <header className="chat-header">
             <div>
               <h2>{activeTitle}</h2>
-              <p>支持文字生图和图片 + 文字编辑</p>
+              <p>结果画廊优先展示，生成记录保留完整上下文</p>
             </div>
           </header>
 
@@ -610,36 +617,62 @@ export function ChatShell() {
             </div>
           ) : null}
 
-          <MessageList
-            messages={displayMessages}
-            disabled={isSubmittingJob}
-            onReuseImage={(message) => {
-              void runAction(() => handleReuseImage(message));
-            }}
-            onRetry={(message) => {
-              void runAction(() => handleRetry(message));
-            }}
-            onDelete={(message) => {
-              void runAction(() => handleDeleteMessage(message.id));
-            }}
-            onPreviewImage={(image) => {
-              setPreviewImage({
-                filePath: image.filePath,
-                alt: image.sourceType === "uploaded" ? "参考图" : "生成结果"
-              });
-            }}
-            onToggleTemplate={(image, message) => {
-              void runAction(() => handleToggleTemplate(image, message));
-            }}
-          />
+          <div className="workbench-body">
+            <div className="result-workspace">
+              <div className="gallery-toolbar">
+                <div>
+                  <h3>生成结果</h3>
+                  <p>{galleryItems.length} 张图片</p>
+                </div>
+                <button
+                  type="button"
+                  className="record-drawer-open-button"
+                  onClick={() => setIsRecordDrawerOpen(true)}
+                  disabled={displayMessages.length === 0}
+                >
+                  查看生成记录
+                  <span>{displayMessages.length}</span>
+                </button>
+              </div>
 
-          <ChatComposer
-            activeSessionId={activeSessionId}
-            draft={composerDraft}
-            disabled={isComposerDisabled}
-            onOpenTemplatePicker={openTemplatePicker}
-            onSubmitted={handleSubmit}
-          />
+              <ImageResultGallery
+                items={galleryItems}
+                disabled={isSubmittingJob}
+                onPreview={(item) => {
+                  setPreviewImage({
+                    filePath: item.image.filePath,
+                    alt: item.prompt || "生成结果"
+                  });
+                }}
+                onRetry={(item) => {
+                  void runAction(() => handleRetry(item.message));
+                }}
+                onRefine={(item) => {
+                  void runAction(() => handleReuseImage(item.message));
+                }}
+                onToggleTemplate={(item) => {
+                  void runAction(() => handleToggleTemplate(item.image, item.message));
+                }}
+                onDelete={(item) => {
+                  void runAction(() => handleDeleteMessage(item.message.id));
+                }}
+              />
+            </div>
+
+            <aside className="creation-panel">
+              <div className="creation-panel-header">
+                <h3>创作参数</h3>
+                <p>固定入口，减少在聊天记录里来回找设置。</p>
+              </div>
+              <ChatComposer
+                activeSessionId={activeSessionId}
+                draft={composerDraft}
+                disabled={isComposerDisabled}
+                onOpenTemplatePicker={openTemplatePicker}
+                onSubmitted={handleSubmit}
+              />
+            </aside>
+          </div>
         </>
       </section>
 
@@ -679,6 +712,50 @@ export function ChatShell() {
               }}
             />
           </div>
+        </div>
+      ) : null}
+
+      {isRecordDrawerOpen ? (
+        <div
+          className="record-drawer-backdrop"
+          onClick={() => setIsRecordDrawerOpen(false)}
+        >
+          <aside
+            className="record-drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="record-drawer-header">
+              <div>
+                <h2>生成记录</h2>
+                <p>保留 prompt、参考图、任务状态和失败重试入口。</p>
+              </div>
+              <button type="button" onClick={() => setIsRecordDrawerOpen(false)}>
+                关闭
+              </button>
+            </div>
+            <MessageList
+              messages={displayMessages}
+              disabled={isSubmittingJob}
+              onReuseImage={(message) => {
+                void runAction(() => handleReuseImage(message));
+              }}
+              onRetry={(message) => {
+                void runAction(() => handleRetry(message));
+              }}
+              onDelete={(message) => {
+                void runAction(() => handleDeleteMessage(message.id));
+              }}
+              onPreviewImage={(image) => {
+                setPreviewImage({
+                  filePath: image.filePath,
+                  alt: image.sourceType === "uploaded" ? "参考图" : "生成结果"
+                });
+              }}
+              onToggleTemplate={(image, message) => {
+                void runAction(() => handleToggleTemplate(image, message));
+              }}
+            />
+          </aside>
         </div>
       ) : null}
 

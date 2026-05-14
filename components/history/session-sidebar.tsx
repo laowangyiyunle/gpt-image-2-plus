@@ -23,11 +23,11 @@ export function SessionSidebar({
     <aside className="session-sidebar">
       <div className="session-sidebar-header">
         <div>
-          <h1>图片对话</h1>
-          <p>本地历史会话</p>
+          <h1>图片创作台</h1>
+          <p>本地项目历史</p>
         </div>
         <button type="button" onClick={onCreate} disabled={disabled}>
-          新建会话
+          新建项目
         </button>
       </div>
 
@@ -54,7 +54,7 @@ export function SessionSidebar({
             <button
               type="button"
               className="session-delete-button"
-              aria-label={`删除会话 ${session.title}`}
+              aria-label={`删除项目 ${session.title}`}
               disabled={disabled}
               onClick={() => onDelete(session.id)}
             >

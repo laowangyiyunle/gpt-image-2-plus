@@ -232,7 +232,7 @@ export function ChatComposer({
     <form ref={formRef} className="chat-composer" onSubmit={handleSubmit}>
       <label className="composer-textarea-label">
         <span className="composer-label-row">
-          <span>输入提示词</span>
+          <span>画面描述</span>
           <button
             type="button"
             className="prompt-optimize-button"
@@ -250,8 +250,8 @@ export function ChatComposer({
           onKeyDown={handlePromptKeyDown}
           onPaste={handlePromptPaste}
           disabled={disabled || submitting || optimizing}
-          placeholder="请输入你想生成的图片内容，支持中文描述。按 Enter 发送，Ctrl + Enter 换行，也支持直接粘贴图片。"
-          rows={3}
+          placeholder="描述主体、场景、风格和用途。按 Enter 生成，Ctrl + Enter 换行，也支持直接粘贴参考图。"
+          rows={7}
         />
       </label>
 
@@ -345,7 +345,7 @@ export function ChatComposer({
           {selectedFileName || "未选择文件"}
         </span>
         <button type="submit" disabled={disabled || submitting || optimizing}>
-          {submitting ? "生成中..." : "发送生成"}
+          {submitting ? "生成中..." : "生成图片"}
         </button>
       </div>
 

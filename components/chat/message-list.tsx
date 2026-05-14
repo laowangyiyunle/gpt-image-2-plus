@@ -42,8 +42,8 @@ export function MessageList({
     return (
       <section className="message-list empty-state">
         <div className="empty-state-card">
-          <h2>开始一个新会话</h2>
-          <p>输入中文描述，或者先上传一张参考图，再补充你的修改要求。</p>
+          <h2>暂无生成记录</h2>
+          <p>右侧提交后，这里会保留每次生成、失败、重试和参考图上下文。</p>
         </div>
       </section>
     );
