@@ -42,6 +42,7 @@ function initializeDatabase(db: DatabaseInstance) {
       content TEXT NOT NULL,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      deleted_at TEXT,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 
@@ -103,6 +104,15 @@ function initializeDatabase(db: DatabaseInstance) {
     .prepare(`PRAGMA table_info(image_assets)`)
     .all() as Array<{ name: string }>;
   const columnNames = new Set(imageAssetColumns.map((column) => column.name));
+
+  const messageColumns = db
+    .prepare(`PRAGMA table_info(messages)`)
+    .all() as Array<{ name: string }>;
+  const messageColumnNames = new Set(messageColumns.map((column) => column.name));
+
+  if (!messageColumnNames.has("deleted_at")) {
+    db.exec(`ALTER TABLE messages ADD COLUMN deleted_at TEXT`);
+  }
 
   if (!columnNames.has("is_template")) {
     db.exec(`ALTER TABLE image_assets ADD COLUMN is_template INTEGER NOT NULL DEFAULT 0`);

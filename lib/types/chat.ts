@@ -36,6 +36,7 @@ export type ChatMessage = {
   status: "pending" | "success" | "failed";
   images: ChatImageAsset[];
   createdAt: string;
+  deletedAt?: string | null;
   progress?: ChatProgress;
 };
 

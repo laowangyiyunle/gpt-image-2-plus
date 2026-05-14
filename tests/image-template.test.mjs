@@ -13,6 +13,8 @@ const {
   deleteMessageById,
   getSessionById,
   listImageTemplates,
+  listDeletedMessages,
+  restoreMessageById,
   updateAssistantMessageWithImages,
   updateImageTemplate
 } = await import("../lib/services/session-service.ts");
@@ -66,6 +68,21 @@ assert.equal(templates.length, 1);
 assert.equal(templates[0].id, generatedImage.id);
 assert.equal(templates[0].filePath, "/generated/template-source.png");
 assert.equal(templates[0].templatePrompt, "Custom template prompt");
+
+let trashMessages = await listDeletedMessages(session.id);
+assert.equal(trashMessages.length, 1);
+assert.equal(trashMessages[0].id, completed.id);
+assert.equal(trashMessages[0].images[0].filePath, "/generated/template-source.png");
+
+const restoredMessage = await restoreMessageById(completed.id);
+assert.equal(restoredMessage?.messageId, completed.id);
+
+trashMessages = await listDeletedMessages(session.id);
+assert.equal(trashMessages.length, 0);
+hydrated = await getSessionById(session.id);
+assert.equal(hydrated?.messages.length, 1);
+
+await deleteMessageById(completed.id);
 
 await updateImageTemplate({
   imageId: generatedImage.id,

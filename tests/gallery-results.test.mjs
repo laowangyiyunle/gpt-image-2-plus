@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { getImageResultGalleryItems } from "../lib/gallery-results.ts";
+import {
+  getImageResultGalleryItems,
+  getImageResultGalleryStats
+} from "../lib/gallery-results.ts";
 
 const messages = [
   {
@@ -61,8 +64,21 @@ const messages = [
 
 const items = getImageResultGalleryItems(messages);
 
-assert.equal(items.length, 1);
-assert.equal(items[0].id, "generated-1");
-assert.equal(items[0].prompt, "生成一张蓝色科技海报");
-assert.equal(items[0].message.id, "assistant-1");
-assert.equal(items[0].image.filePath, "/generated/result-1.png");
+assert.equal(items.length, 2);
+assert.equal(items[0].id, "assistant-2");
+assert.equal(items[0].kind, "generating");
+assert.equal(items[0].prompt, "再做一版更简洁的");
+assert.equal(items[0].message.id, "assistant-2");
+
+assert.equal(items[1].id, "generated-1");
+assert.equal(items[1].kind, "generated");
+assert.equal(items[1].prompt, "生成一张蓝色科技海报");
+assert.equal(items[1].message.id, "assistant-1");
+assert.equal(items[1].image.filePath, "/generated/result-1.png");
+
+const stats = getImageResultGalleryStats(messages);
+
+assert.equal(stats.generatedCount, 1);
+assert.equal(stats.generatingCount, 1);
+assert.equal(stats.totalMessages, 4);
+assert.equal(stats.isGenerating, true);

@@ -13,7 +13,10 @@ import { MessageList } from "@/components/chat/message-list";
 import { SessionSidebar } from "@/components/history/session-sidebar";
 import { OpenAIKeySettings } from "@/components/settings/openai-key-settings";
 import { withRecoverablePendingProgressAt } from "@/lib/chat-message-display";
-import { getImageResultGalleryItems } from "@/lib/gallery-results";
+import {
+  getImageResultGalleryItems,
+  getImageResultGalleryStats
+} from "@/lib/gallery-results";
 import type {
   ChatImageAsset,
   ChatMessage,
@@ -76,6 +79,14 @@ type TemplateNameTarget =
       initialPrompt: string;
     };
 
+type ConfirmDialogTarget = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => Promise<void>;
+};
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const data = (await response.json().catch(() => ({}))) as T & {
@@ -133,15 +144,27 @@ export function ChatShell() {
   const [isSavingTemplateName, setIsSavingTemplateName] = useState(false);
   const [templateNameError, setTemplateNameError] = useState("");
   const [isRecordDrawerOpen, setIsRecordDrawerOpen] = useState(false);
+  const [isTrashDrawerOpen, setIsTrashDrawerOpen] = useState(false);
+  const [trashMessages, setTrashMessages] = useState<ChatMessage[]>([]);
+  const [trashError, setTrashError] = useState("");
+  const [isLoadingTrash, setIsLoadingTrash] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogTarget | null>(
+    null
+  );
+  const [isConfirmingDialog, setIsConfirmingDialog] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const hasPendingMessages = messages.some((message) => message.status === "pending");
-  const isComposerDisabled = isSubmittingJob || hasPendingMessages;
+  const isComposerDisabled = isSubmittingJob;
   const displayMessages = useMemo(
     () => withRecoverablePendingProgressAt(messages, nowMs),
     [messages, nowMs]
   );
   const galleryItems = useMemo(
     () => getImageResultGalleryItems(displayMessages),
+    [displayMessages]
+  );
+  const galleryStats = useMemo(
+    () => getImageResultGalleryStats(displayMessages),
     [displayMessages]
   );
 
@@ -206,21 +229,31 @@ export function ChatShell() {
   }
 
   async function handleDeleteSession(sessionId: string) {
-    await fetchJson(`/api/chat/sessions/${sessionId}`, {
-      method: "DELETE"
+    const session = sessions.find((item) => item.id === sessionId);
+    setConfirmDialog({
+      title: "删除项目",
+      description: `确定删除项目「${session?.title ?? "未命名项目"}」吗？项目删除后不会进入消息回收站，请确认不再需要。`,
+      confirmLabel: "删除项目",
+      danger: true,
+      onConfirm: async () => {
+        await fetchJson(`/api/chat/sessions/${sessionId}`, {
+          method: "DELETE"
+        });
+
+        const nextSessions = sessions.filter((session) => session.id !== sessionId);
+        setSessions(nextSessions);
+
+        if (activeSessionId === sessionId) {
+          const nextSessionId = nextSessions[0]?.id ?? null;
+          setActiveSessionId(nextSessionId);
+          setMessages([]);
+          setTrashMessages([]);
+          return;
+        }
+
+        await loadSessions();
+      }
     });
-
-    const nextSessions = sessions.filter((session) => session.id !== sessionId);
-    setSessions(nextSessions);
-
-    if (activeSessionId === sessionId) {
-      const nextSessionId = nextSessions[0]?.id ?? null;
-      setActiveSessionId(nextSessionId);
-      setMessages([]);
-      return;
-    }
-
-    await loadSessions();
   }
 
   async function handleDeleteMessage(messageId: string) {
@@ -228,11 +261,60 @@ export function ChatShell() {
       return;
     }
 
-    await fetchJson(`/api/chat/messages/${messageId}`, {
-      method: "DELETE"
+    setConfirmDialog({
+      title: "删除生成记录",
+      description: "确定删除这条生成记录吗？删除后会进入回收站，可以稍后恢复。",
+      confirmLabel: "移入回收站",
+      danger: true,
+      onConfirm: async () => {
+        await fetchJson(`/api/chat/messages/${messageId}`, {
+          method: "DELETE"
+        });
+
+        setMessages((current) =>
+          current.filter((message) => message.id !== messageId)
+        );
+        await loadTrash(activeSessionId);
+        await loadSessions();
+      }
+    });
+  }
+
+  async function loadTrash(sessionId = activeSessionId) {
+    if (!sessionId) {
+      setTrashMessages([]);
+      return;
+    }
+
+    setIsLoadingTrash(true);
+    setTrashError("");
+
+    try {
+      const data = await fetchJson<{ messages: ChatMessage[] }>(
+        `/api/chat/sessions/${sessionId}/trash`
+      );
+      setTrashMessages(data.messages);
+    } catch (error) {
+      setTrashError(error instanceof Error ? error.message : "回收站加载失败。");
+    } finally {
+      setIsLoadingTrash(false);
+    }
+  }
+
+  function openTrashDrawer() {
+    setIsTrashDrawerOpen(true);
+    void loadTrash();
+  }
+
+  async function handleRestoreMessage(messageId: string) {
+    await fetchJson(`/api/chat/messages/${messageId}/restore`, {
+      method: "POST"
     });
 
-    setMessages((current) => current.filter((message) => message.id !== messageId));
+    if (activeSessionId) {
+      await Promise.all([loadSession(activeSessionId), loadTrash(activeSessionId)]);
+    }
+
     await loadSessions();
   }
 
@@ -255,11 +337,21 @@ export function ChatShell() {
 
   useEffect(() => {
     if (!activeSessionId) {
+      setTrashMessages([]);
       return;
     }
 
     void loadSession(activeSessionId);
+    void loadTrash(activeSessionId);
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!isTrashDrawerOpen) {
+      return;
+    }
+
+    void loadTrash(activeSessionId);
+  }, [activeSessionId, isTrashDrawerOpen]);
 
   useEffect(() => {
     if (!hasPendingMessages) {
@@ -518,20 +610,37 @@ export function ChatShell() {
   }
 
   async function handleDeleteTemplate(template: ImageTemplate) {
-    const confirmed = window.confirm(
-      `确定删除模板「${template.templateName || template.sessionTitle}」吗？\n\n这只会从模板库移除，不会删除原聊天里的图片。`
-    );
+    setConfirmDialog({
+      title: "删除模板",
+      description: `确定删除模板「${template.templateName || template.sessionTitle}」吗？这只会从模板库移除，不会删除原聊天里的图片。`,
+      confirmLabel: "删除模板",
+      danger: true,
+      onConfirm: async () => {
+        await saveImageTemplate({
+          image: template,
+          isTemplate: false,
+          templateName: null,
+          templatePrompt: null
+        });
+      }
+    });
+  }
 
-    if (!confirmed) {
+  async function handleConfirmDialogSubmit() {
+    if (!confirmDialog) {
       return;
     }
 
-    await saveImageTemplate({
-      image: template,
-      isTemplate: false,
-      templateName: null,
-      templatePrompt: null
-    });
+    try {
+      setIsConfirmingDialog(true);
+      setAppMessage("");
+      await confirmDialog.onConfirm();
+      setConfirmDialog(null);
+    } catch (error) {
+      setAppMessage(error instanceof Error ? error.message : "操作失败，请稍后重试。");
+    } finally {
+      setIsConfirmingDialog(false);
+    }
   }
 
   async function handleRetry(message: ChatMessage) {
@@ -622,17 +731,49 @@ export function ChatShell() {
               <div className="gallery-toolbar">
                 <div>
                   <h3>生成结果</h3>
-                  <p>{galleryItems.length} 张图片</p>
+                  <p>
+                    已生成 {galleryStats.generatedCount} 张
+                    {galleryStats.isGenerating
+                      ? `，正在生成 ${galleryStats.generatingCount} 个任务`
+                      : ""}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  className="record-drawer-open-button"
-                  onClick={() => setIsRecordDrawerOpen(true)}
-                  disabled={displayMessages.length === 0}
-                >
-                  查看生成记录
-                  <span>{displayMessages.length}</span>
-                </button>
+                <div className="gallery-toolbar-actions">
+                  <button
+                    type="button"
+                    className={`record-drawer-open-button ${
+                      galleryStats.isGenerating
+                        ? "record-drawer-open-button-loading"
+                        : ""
+                    }`}
+                    onClick={() => setIsRecordDrawerOpen(true)}
+                    disabled={displayMessages.length === 0}
+                  >
+                    {galleryStats.isGenerating ? (
+                      <span className="record-loading-spinner" aria-hidden="true" />
+                    ) : null}
+                    <span className="record-drawer-open-label">查看生成记录</span>
+                    <span className="record-status-pill">
+                      已生成 {galleryStats.generatedCount}
+                    </span>
+                    <span
+                      className={`record-status-pill ${
+                        galleryStats.isGenerating ? "record-status-pill-active" : ""
+                      }`}
+                    >
+                      生成中 {galleryStats.generatingCount}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="trash-drawer-open-button"
+                    onClick={openTrashDrawer}
+                    disabled={!activeSessionId}
+                  >
+                    回收站
+                    <span>{trashMessages.length}</span>
+                  </button>
+                </div>
               </div>
 
               <ImageResultGallery
@@ -756,6 +897,139 @@ export function ChatShell() {
               }}
             />
           </aside>
+        </div>
+      ) : null}
+
+      {isTrashDrawerOpen ? (
+        <div
+          className="record-drawer-backdrop"
+          onClick={() => setIsTrashDrawerOpen(false)}
+        >
+          <aside
+            className="record-drawer trash-drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="record-drawer-header">
+              <div>
+                <h2>回收站</h2>
+                <p>已删除的生成记录会先放在这里，恢复后重新回到图片创作台。</p>
+              </div>
+              <button type="button" onClick={() => setIsTrashDrawerOpen(false)}>
+                关闭
+              </button>
+            </div>
+
+            <div className="trash-list">
+              {isLoadingTrash ? (
+                <div className="trash-empty">正在加载回收站...</div>
+              ) : trashError ? (
+                <div className="trash-empty">{trashError}</div>
+              ) : trashMessages.length === 0 ? (
+                <div className="trash-empty">回收站为空。</div>
+              ) : (
+                trashMessages.map((message) => (
+                  <article key={message.id} className="trash-item">
+                    <div className="trash-item-main">
+                      <span className="trash-item-role">
+                        {message.role === "user" ? "你" : "助手"}
+                      </span>
+                      <p>{message.content}</p>
+                      <span className="trash-item-time">
+                        删除时间：
+                        {message.deletedAt
+                          ? new Date(message.deletedAt).toLocaleString("zh-CN")
+                          : "未知"}
+                      </span>
+                      {message.images.length > 0 ? (
+                        <div className="trash-item-images">
+                          {message.images.map((image) => (
+                            <button
+                              key={image.id}
+                              type="button"
+                              onClick={() =>
+                                setPreviewImage({
+                                  filePath: image.filePath,
+                                  alt:
+                                    image.sourceType === "uploaded"
+                                      ? "参考图"
+                                      : "生成结果"
+                                })
+                              }
+                            >
+                              <img
+                                src={image.filePath}
+                                alt={
+                                  image.sourceType === "uploaded"
+                                    ? "参考图"
+                                    : "生成结果"
+                                }
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="trash-restore-button"
+                      onClick={() => {
+                        void runAction(() => handleRestoreMessage(message.id));
+                      }}
+                    >
+                      恢复
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {confirmDialog ? (
+        <div
+          className="confirm-dialog-backdrop"
+          onClick={() => {
+            if (!isConfirmingDialog) {
+              setConfirmDialog(null);
+            }
+          }}
+        >
+          <div
+            className="confirm-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="confirm-dialog-header">
+              <h2>{confirmDialog.title}</h2>
+              <button
+                type="button"
+                disabled={isConfirmingDialog}
+                onClick={() => setConfirmDialog(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <p>{confirmDialog.description}</p>
+            <div className="confirm-dialog-actions">
+              <button
+                type="button"
+                disabled={isConfirmingDialog}
+                onClick={() => setConfirmDialog(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className={confirmDialog.danger ? "confirm-dialog-danger" : ""}
+                disabled={isConfirmingDialog}
+                onClick={() => {
+                  void handleConfirmDialogSubmit();
+                }}
+              >
+                {isConfirmingDialog ? "处理中..." : confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

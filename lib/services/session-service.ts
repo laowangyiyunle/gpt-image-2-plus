@@ -17,6 +17,7 @@ type MessageRow = {
   content: string;
   status: string;
   created_at: string;
+  deleted_at: string | null;
 };
 
 type ImageAssetRow = {
@@ -123,6 +124,7 @@ function mapMessage(row: MessageRow, images: ImageAssetRow[]) {
     content: row.content,
     status: row.status as "pending" | "success" | "failed",
     createdAt: row.created_at,
+    deletedAt: row.deleted_at,
     images: images.map(mapImage)
   };
 }
@@ -153,6 +155,7 @@ function updateSessionAfterUserPrompt(args: {
         SELECT COUNT(*) AS count
         FROM messages
         WHERE session_id = ?
+          AND deleted_at IS NULL
       `
     )
     .get(args.sessionId) as { count: number };
@@ -204,6 +207,7 @@ export async function listSessions() {
             SELECT m.content
             FROM messages m
             WHERE m.session_id = s.id
+              AND m.deleted_at IS NULL
             ORDER BY m.created_at DESC
             LIMIT 1
           ) AS last_message_content
@@ -239,9 +243,10 @@ export async function getSessionById(id: string) {
   const messageRows = db
     .prepare(
       `
-        SELECT id, session_id, role, content, status, created_at
+        SELECT id, session_id, role, content, status, created_at, deleted_at
         FROM messages
         WHERE session_id = ?
+          AND deleted_at IS NULL
         ORDER BY created_at ASC
       `
     )
@@ -401,9 +406,10 @@ function getMessageWithImages(messageId: string) {
   const messageRow = db
     .prepare(
       `
-        SELECT id, session_id, role, content, status, created_at
+        SELECT id, session_id, role, content, status, created_at, deleted_at
         FROM messages
         WHERE id = ?
+          AND deleted_at IS NULL
       `
     )
     .get(messageId) as MessageRow | undefined;
@@ -985,6 +991,7 @@ function refreshSessionUpdatedAt(sessionId: string) {
         SELECT created_at
         FROM messages
         WHERE session_id = ?
+          AND deleted_at IS NULL
         ORDER BY created_at DESC
         LIMIT 1
       `
@@ -1022,6 +1029,7 @@ export async function deleteMessageById(messageId: string) {
         SELECT id, session_id
         FROM messages
         WHERE id = ?
+          AND deleted_at IS NULL
       `
     )
     .get(messageId) as { id: string; session_id: string } | undefined;
@@ -1030,19 +1038,90 @@ export async function deleteMessageById(messageId: string) {
     return null;
   }
 
-  const filePaths = getMessageImagePaths(messageId);
+  const deletedAt = nowIso();
 
   const transaction = db.transaction(() => {
-    db.prepare(`DELETE FROM messages WHERE id = ?`).run(messageId);
+    db.prepare(`UPDATE messages SET deleted_at = ? WHERE id = ?`).run(
+      deletedAt,
+      messageId
+    );
     refreshSessionUpdatedAt(message.session_id);
   });
 
   transaction();
-  await cleanupFiles(filePaths);
+
+  return {
+    messageId,
+    sessionId: message.session_id,
+    deletedAt
+  };
+}
+
+export async function restoreMessageById(messageId: string) {
+  const db = getDb();
+  const message = db
+    .prepare(
+      `
+        SELECT id, session_id
+        FROM messages
+        WHERE id = ?
+          AND deleted_at IS NOT NULL
+      `
+    )
+    .get(messageId) as { id: string; session_id: string } | undefined;
+
+  if (!message) {
+    return null;
+  }
+
+  const transaction = db.transaction(() => {
+    db.prepare(`UPDATE messages SET deleted_at = NULL WHERE id = ?`).run(messageId);
+    refreshSessionUpdatedAt(message.session_id);
+  });
+
+  transaction();
 
   return {
     messageId,
     sessionId: message.session_id
   };
+}
+
+export async function listDeletedMessages(sessionId: string) {
+  const db = getDb();
+  const messageRows = db
+    .prepare(
+      `
+        SELECT id, session_id, role, content, status, created_at, deleted_at
+        FROM messages
+        WHERE session_id = ?
+          AND deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+      `
+    )
+    .all(sessionId) as MessageRow[];
+
+  const imageRows = db
+    .prepare(
+      `
+        SELECT id, session_id, message_id, file_path, mime_type, width, height, source_type, is_template, template_name, template_prompt, created_at
+        FROM image_assets
+        WHERE session_id = ?
+        ORDER BY created_at ASC
+      `
+    )
+    .all(sessionId) as ImageAssetRow[];
+
+  const imagesByMessageId = new Map<string, ImageAssetRow[]>();
+
+  for (const image of imageRows) {
+    const current = imagesByMessageId.get(image.message_id) ?? [];
+    current.push(image);
+    imagesByMessageId.set(image.message_id, current);
+  }
+
+  return messageRows.map((message) =>
+    mapMessage(message, imagesByMessageId.get(message.id) ?? [])
+  );
 }
 

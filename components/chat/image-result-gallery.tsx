@@ -34,44 +34,73 @@ export function ImageResultGallery({
 
   return (
     <section className="image-gallery" aria-label="生成结果画廊">
-      {items.map((item) => (
-        <article key={item.id} className="image-result-card">
-          <button
-            type="button"
-            className="image-result-preview-button"
-            onClick={() => onPreview(item)}
+      {items.map((item) => {
+        const isGenerating = item.kind === "generating";
+
+        return (
+          <article
+            key={item.id}
+            className={`image-result-card ${
+              isGenerating ? "image-result-card-generating" : ""
+            }`}
           >
-            <img
-              src={item.image.filePath}
-              alt={item.prompt || "生成结果"}
-              className="image-result-preview"
-            />
-          </button>
-          <div className="image-result-meta">
-            <p>{item.prompt || "未记录提示词"}</p>
-            <span>{formatMessageCreatedAt(item.createdAt)}</span>
-          </div>
-          <div className="image-result-card-footer">
-            <span>{item.image.isTemplate ? "已保存为模板" : "生成结果"}</span>
-            <button
-              type="button"
-              className="image-result-delete-button"
-              disabled={disabled}
-              onClick={() => onDelete(item)}
-            >
-              删除
-            </button>
-          </div>
-          <ChatImageActions
-            imagePath={item.image.filePath}
-            disabled={disabled}
-            isTemplate={item.image.isTemplate}
-            onRetry={() => onRetry(item)}
-            onRefine={() => onRefine(item)}
-            onToggleTemplate={() => onToggleTemplate(item)}
-          />
-        </article>
-      ))}
+            {isGenerating ? (
+              <div className="image-result-generating-preview" aria-hidden="true">
+                <div className="message-image-skeleton" />
+                <span>生成中...</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="image-result-preview-button"
+                onClick={() => onPreview(item)}
+              >
+                <img
+                  src={item.image.filePath}
+                  alt={item.prompt || "生成结果"}
+                  className="image-result-preview"
+                />
+              </button>
+            )}
+            <div className="image-result-meta">
+              <p>{item.prompt || "未记录提示词"}</p>
+              <span>
+                {formatMessageCreatedAt(item.createdAt)}
+                {item.message.progress
+                  ? ` · ${item.message.progress.percent}%`
+                  : ""}
+              </span>
+            </div>
+            <div className="image-result-card-footer">
+              <span>
+                {isGenerating
+                  ? "正在生成"
+                  : item.image.isTemplate
+                    ? "已保存为模板"
+                    : "生成结果"}
+              </span>
+              <button
+                type="button"
+                className="image-result-delete-button"
+                disabled={disabled}
+                onClick={() => onDelete(item)}
+              >
+                {isGenerating ? "取消" : "删除"}
+              </button>
+            </div>
+            {isGenerating ? null : (
+              <ChatImageActions
+                imagePath={item.image.filePath}
+                disabled={disabled}
+                isTemplate={item.image.isTemplate}
+                onRetry={() => onRetry(item)}
+                onRefine={() => onRefine(item)}
+                onToggleTemplate={() => onToggleTemplate(item)}
+              />
+            )}
+          </article>
+        );
+      })}
     </section>
   );
 }
