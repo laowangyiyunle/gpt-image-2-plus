@@ -5,6 +5,7 @@ import {
   getFitPreviewScale,
   getMaxPreviewScale,
   getNextDoubleClickScale,
+  getNextPreviewImageIndex,
   getWheelZoomState
 } from "../lib/image-preview-zoom.ts";
 
@@ -74,3 +75,9 @@ assert.deepEqual(
     y: -500
   }
 );
+
+assert.equal(getNextPreviewImageIndex(0, 3, 1), 1);
+assert.equal(getNextPreviewImageIndex(2, 3, 1), 0);
+assert.equal(getNextPreviewImageIndex(0, 3, -1), 2);
+assert.equal(getNextPreviewImageIndex(0, 1, 1), 0);
+assert.equal(getNextPreviewImageIndex(0, 0, 1), 0);

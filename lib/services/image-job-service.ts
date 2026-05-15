@@ -18,9 +18,11 @@ type GenerateJobArgs = {
 };
 
 type EditJobArgs = GenerateJobArgs & {
-  imageBuffer: Buffer;
-  imageMimeType: string;
-  uploadedImage: StoredImageInput;
+  imageInputs: Array<{
+    buffer: Buffer;
+    mimeType: string;
+  }>;
+  uploadedImages: StoredImageInput[];
 };
 
 function generationErrorMessage(error: unknown) {
@@ -74,7 +76,7 @@ async function finishEditJob(args: EditJobArgs & { messageId: string }) {
       content: "已根据参考图生成新图片。",
       status: "success",
       images: [
-        args.uploadedImage,
+        ...args.uploadedImages,
         ...images.map((image) => ({
           filePath: image.publicPath,
           mimeType: "image/png",
@@ -92,7 +94,7 @@ async function finishEditJob(args: EditJobArgs & { messageId: string }) {
       sessionId: args.sessionId,
       content: generationErrorMessage(error),
       status: "failed",
-      images: [args.uploadedImage]
+      images: args.uploadedImages
     });
   }
 }
@@ -128,7 +130,7 @@ export async function startEditImageJob(args: EditJobArgs) {
     sessionId: args.sessionId,
     prompt: args.prompt,
     assistantContent: "参考图生成任务已提交，请稍等。",
-    assistantImages: [args.uploadedImage]
+    assistantImages: args.uploadedImages
   });
 
   void finishEditJob({

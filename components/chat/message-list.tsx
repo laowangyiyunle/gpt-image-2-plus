@@ -10,7 +10,7 @@ type MessageListProps = {
   onReuseImage?: (message: ChatMessage) => void;
   onRetry?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
-  onPreviewImage?: (image: ChatImageAsset) => void;
+  onPreviewImage?: (image: ChatImageAsset, images: ChatImageAsset[]) => void;
   onToggleTemplate?: (image: ChatImageAsset, message: ChatMessage) => void;
 };
 

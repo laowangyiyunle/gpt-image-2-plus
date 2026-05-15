@@ -61,6 +61,18 @@ export function getNextDoubleClickScale(currentScale: number) {
     : DOUBLE_CLICK_PREVIEW_SCALE;
 }
 
+export function getNextPreviewImageIndex(
+  currentIndex: number,
+  imageCount: number,
+  direction: -1 | 1
+) {
+  if (imageCount <= 1) {
+    return 0;
+  }
+
+  return (currentIndex + direction + imageCount) % imageCount;
+}
+
 export function getWheelScale(currentScale: number, deltaY: number) {
   const multiplier = deltaY < 0 ? 1.18 : 1 / 1.18;
   const nextScale = Math.round(currentScale * multiplier * 100) / 100;

@@ -11,7 +11,7 @@ type MessageItemProps = {
   onReuseImage?: (message: ChatMessage) => void;
   onRetry?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
-  onPreviewImage?: (image: ChatImageAsset) => void;
+  onPreviewImage?: (image: ChatImageAsset, images: ChatImageAsset[]) => void;
   onToggleTemplate?: (image: ChatImageAsset, message: ChatMessage) => void;
 };
 
@@ -100,7 +100,7 @@ export function MessageItem({
                   <button
                     type="button"
                     className="message-image-preview-button"
-                    onClick={() => onPreviewImage?.(image)}
+                    onClick={() => onPreviewImage?.(image, message.images)}
                   >
                     <img
                       src={image.filePath}

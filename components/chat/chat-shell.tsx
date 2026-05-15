@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChatComposer,
   type ComposerDraft
@@ -17,6 +17,11 @@ import {
   getImageResultGalleryItems,
   getImageResultGalleryStats
 } from "@/lib/gallery-results";
+import {
+  collectCompletedGenerationNotifications,
+  getPendingGenerationNotificationIds,
+  type GenerationNotification
+} from "@/lib/generation-notifications";
 import type {
   ChatImageAsset,
   ChatMessage,
@@ -30,15 +35,18 @@ type SessionDetailsResponse = {
 
 type SubmitArgs = {
   prompt: string;
-  imageFile: File | null;
+  imageFiles: File[];
   size: string;
   quality: string;
   count: number;
 };
 
 type PreviewImage = {
-  filePath: string;
-  alt: string;
+  images: Array<{
+    filePath: string;
+    alt: string;
+  }>;
+  initialIndex: number;
 };
 
 type KeyStatus = {
@@ -110,6 +118,28 @@ function fileNameFromPath(filePath: string, fallbackExtension: string) {
   return `reference.${fallbackExtension}`;
 }
 
+function altForChatImage(image: Pick<ChatImageAsset, "sourceType">) {
+  return image.sourceType === "uploaded" ? "参考图" : "生成结果";
+}
+
+function previewFromImages(
+  images: Array<Pick<ChatImageAsset, "filePath" | "sourceType">>,
+  selectedImage: Pick<ChatImageAsset, "filePath" | "sourceType">
+): PreviewImage {
+  const initialIndex = Math.max(
+    0,
+    images.findIndex((image) => image.filePath === selectedImage.filePath)
+  );
+
+  return {
+    images: images.map((image) => ({
+      filePath: image.filePath,
+      alt: altForChatImage(image)
+    })),
+    initialIndex
+  };
+}
+
 async function fileFromImageAsset(image: Pick<ChatImageAsset, "filePath" | "mimeType">) {
   const response = await fetch(image.filePath);
 
@@ -124,6 +154,35 @@ async function fileFromImageAsset(image: Pick<ChatImageAsset, "filePath" | "mime
   return new File([blob], fileNameFromPath(image.filePath, extension), {
     type: mimeType
   });
+}
+
+function canUseBrowserNotifications() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+async function requestGenerationNotificationPermission() {
+  if (!canUseBrowserNotifications() || Notification.permission !== "default") {
+    return;
+  }
+
+  await Notification.requestPermission().catch(() => undefined);
+}
+
+function showGenerationNotification(notification: GenerationNotification) {
+  if (
+    !canUseBrowserNotifications() ||
+    Notification.permission !== "granted" ||
+    document.visibilityState === "visible"
+  ) {
+    return;
+  }
+
+  const browserNotification = new Notification(notification.title, {
+    body: notification.body,
+    tag: `image-generation-${notification.messageId}`
+  });
+
+  window.setTimeout(() => browserNotification.close(), 8000);
 }
 
 export function ChatShell() {
@@ -153,6 +212,8 @@ export function ChatShell() {
   );
   const [isConfirmingDialog, setIsConfirmingDialog] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const pendingNotificationMessageIdsRef = useRef<Set<string>>(new Set());
+  const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
   const hasPendingMessages = messages.some((message) => message.status === "pending");
   const isComposerDisabled = isSubmittingJob;
   const displayMessages = useMemo(
@@ -318,6 +379,31 @@ export function ChatShell() {
     await loadSessions();
   }
 
+  async function handleHardDeleteMessage(message: ChatMessage) {
+    setConfirmDialog({
+      title: "彻底删除生成记录",
+      description:
+        "确定彻底删除这条生成记录吗？删除后无法恢复，未被其它记录或模板引用的图片文件也会被清理。",
+      confirmLabel: "彻底删除",
+      danger: true,
+      onConfirm: async () => {
+        await fetchJson(`/api/chat/messages/${message.id}/permanent`, {
+          method: "DELETE"
+        });
+
+        setTrashMessages((current) =>
+          current.filter((item) => item.id !== message.id)
+        );
+
+        if (activeSessionId) {
+          await loadTrash(activeSessionId);
+        }
+
+        await loadSessions();
+      }
+    });
+  }
+
   useEffect(() => {
     void loadSessions(true);
   }, []);
@@ -352,6 +438,21 @@ export function ChatShell() {
 
     void loadTrash(activeSessionId);
   }, [activeSessionId, isTrashDrawerOpen]);
+
+  useEffect(() => {
+    const notifications = collectCompletedGenerationNotifications(
+      pendingNotificationMessageIdsRef.current,
+      messages
+    ).filter((notification) => !notifiedMessageIdsRef.current.has(notification.messageId));
+
+    for (const notification of notifications) {
+      notifiedMessageIdsRef.current.add(notification.messageId);
+      showGenerationNotification(notification);
+    }
+
+    pendingNotificationMessageIdsRef.current =
+      getPendingGenerationNotificationIds(messages);
+  }, [messages]);
 
   useEffect(() => {
     if (!hasPendingMessages) {
@@ -400,13 +501,16 @@ export function ChatShell() {
 
     try {
       setIsSubmittingJob(true);
+      void requestGenerationNotificationPermission();
       let data: ImageJobResponse;
 
-      if (args.imageFile) {
+      if (args.imageFiles.length > 0) {
         const formData = new FormData();
         formData.set("sessionId", sessionId);
         formData.set("prompt", args.prompt);
-        formData.set("image", args.imageFile);
+        for (const imageFile of args.imageFiles) {
+          formData.append("images", imageFile);
+        }
         formData.set("size", args.size);
         formData.set("quality", args.quality);
         formData.set("count", String(args.count));
@@ -490,7 +594,7 @@ export function ChatShell() {
 
     const imageFile = await fileFromImageAsset(generatedImage);
     setComposerDraft({
-      file: imageFile,
+      files: [imageFile],
       focus: true,
       prompt: "",
       version: Date.now()
@@ -583,7 +687,7 @@ export function ChatShell() {
   async function handleSelectTemplate(template: ImageTemplate) {
     const imageFile = await fileFromImageAsset(template);
     setComposerDraft({
-      file: imageFile,
+      files: [imageFile],
       focus: true,
       prompt: template.prompt || "",
       version: Date.now()
@@ -593,8 +697,13 @@ export function ChatShell() {
 
   function handlePreviewTemplate(template: ImageTemplate) {
     setPreviewImage({
-      filePath: template.filePath,
-      alt: template.templateName || "图片模板"
+      images: [
+        {
+          filePath: template.filePath,
+          alt: template.templateName || "图片模板"
+        }
+      ],
+      initialIndex: 0
     });
   }
 
@@ -650,14 +759,14 @@ export function ChatShell() {
       throw new Error("未找到可重新生成的原始提示词。");
     }
 
-    const uploadedImage = message.images.find(
+    const uploadedImages = message.images.filter(
       (image) => image.sourceType === "uploaded"
     );
-    const imageFile = uploadedImage ? await fileFromImageAsset(uploadedImage) : null;
+    const imageFiles = await Promise.all(uploadedImages.map(fileFromImageAsset));
 
     await handleSubmit({
       prompt: previousUserMessage.content,
-      imageFile,
+      imageFiles,
       size: "auto",
       quality: "auto",
       count: 1
@@ -747,7 +856,6 @@ export function ChatShell() {
                         : ""
                     }`}
                     onClick={() => setIsRecordDrawerOpen(true)}
-                    disabled={displayMessages.length === 0}
                   >
                     {galleryStats.isGenerating ? (
                       <span className="record-loading-spinner" aria-hidden="true" />
@@ -780,9 +888,20 @@ export function ChatShell() {
                 items={galleryItems}
                 disabled={isSubmittingJob}
                 onPreview={(item) => {
+                  const galleryImages = galleryItems
+                    .filter((galleryItem) => galleryItem.kind === "generated")
+                    .map((galleryItem) => galleryItem.image);
                   setPreviewImage({
-                    filePath: item.image.filePath,
-                    alt: item.prompt || "生成结果"
+                    images: galleryImages.map((image) => ({
+                      filePath: image.filePath,
+                      alt: "生成结果"
+                    })),
+                    initialIndex: Math.max(
+                      0,
+                      galleryImages.findIndex(
+                        (image) => image.id === item.image.id
+                      )
+                    )
                   });
                 }}
                 onRetry={(item) => {
@@ -886,11 +1005,8 @@ export function ChatShell() {
               onDelete={(message) => {
                 void runAction(() => handleDeleteMessage(message.id));
               }}
-              onPreviewImage={(image) => {
-                setPreviewImage({
-                  filePath: image.filePath,
-                  alt: image.sourceType === "uploaded" ? "参考图" : "生成结果"
-                });
+              onPreviewImage={(image, images) => {
+                setPreviewImage(previewFromImages(images, image));
               }}
               onToggleTemplate={(image, message) => {
                 void runAction(() => handleToggleTemplate(image, message));
@@ -947,13 +1063,7 @@ export function ChatShell() {
                               key={image.id}
                               type="button"
                               onClick={() =>
-                                setPreviewImage({
-                                  filePath: image.filePath,
-                                  alt:
-                                    image.sourceType === "uploaded"
-                                      ? "参考图"
-                                      : "生成结果"
-                                })
+                                setPreviewImage(previewFromImages(message.images, image))
                               }
                             >
                               <img
@@ -969,15 +1079,26 @@ export function ChatShell() {
                         </div>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className="trash-restore-button"
-                      onClick={() => {
-                        void runAction(() => handleRestoreMessage(message.id));
-                      }}
-                    >
-                      恢复
-                    </button>
+                    <div className="trash-item-actions">
+                      <button
+                        type="button"
+                        className="trash-restore-button"
+                        onClick={() => {
+                          void runAction(() => handleRestoreMessage(message.id));
+                        }}
+                      >
+                        恢复
+                      </button>
+                      <button
+                        type="button"
+                        className="trash-hard-delete-button"
+                        onClick={() => {
+                          void handleHardDeleteMessage(message);
+                        }}
+                      >
+                        彻底删除
+                      </button>
+                    </div>
                   </article>
                 ))
               )}
@@ -1035,8 +1156,8 @@ export function ChatShell() {
 
       {previewImage ? (
         <ImagePreviewModal
-          filePath={previewImage.filePath}
-          alt={previewImage.alt}
+          images={previewImage.images}
+          initialIndex={previewImage.initialIndex}
           onClose={() => setPreviewImage(null)}
         />
       ) : null}

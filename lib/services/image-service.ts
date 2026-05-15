@@ -70,21 +70,29 @@ export async function streamImagesFromPrompt(args: {
 
 export async function generateImageFromEdit(args: {
   prompt: string;
-  imageBuffer: Buffer;
-  imageMimeType: string;
+  imageInputs: Array<{
+    buffer: Buffer;
+    mimeType: string;
+  }>;
   size?: string;
   quality?: string;
   count?: number;
 }) {
   const client = getOpenAIClient();
-  const extension = extensionFromMimeType(args.imageMimeType);
+  const imageUploads = await Promise.all(
+    args.imageInputs.map((imageInput, index) => {
+      const extension = extensionFromMimeType(imageInput.mimeType);
+
+      return toFile(imageInput.buffer, `input-${index + 1}.${extension}`, {
+        type: imageInput.mimeType
+      });
+    })
+  );
 
   const response = await client.images.edit({
     model: IMAGE_GENERATION_MODEL,
     prompt: args.prompt,
-    image: await toFile(args.imageBuffer, `input.${extension}`, {
-      type: args.imageMimeType
-    }),
+    image: imageUploads.length === 1 ? imageUploads[0] : imageUploads,
     size: (args.size as "1024x1024" | "1536x1024" | "1024x1536" | "auto" | undefined) ?? "auto",
     quality:
       (args.quality as "low" | "medium" | "high" | "auto" | undefined) ?? "auto",

@@ -8,6 +8,10 @@ import {
 import { startEditImageJob } from "@/lib/services/image-job-service";
 import { getSessionById } from "@/lib/services/session-service";
 import { editImageSchema } from "@/lib/validations/chat";
+import {
+  getReferenceImageFiles,
+  validateReferenceImageFiles
+} from "@/lib/reference-image-files";
 
 export const runtime = "nodejs";
 
@@ -17,7 +21,7 @@ export async function POST(request: NextRequest) {
   await ensureStorageDirs();
 
   const formData = await request.formData();
-  const imageFile = formData.get("image");
+  const imageFiles = getReferenceImageFiles(formData);
   const parsed = editImageSchema.safeParse({
     sessionId: formData.get("sessionId"),
     prompt: formData.get("prompt"),
@@ -26,16 +30,16 @@ export async function POST(request: NextRequest) {
     count: formData.get("count")
   });
 
-  if (!parsed.success || !(imageFile instanceof File)) {
+  if (!parsed.success) {
     return NextResponse.json({ error: "请求参数不完整" }, { status: 400 });
   }
 
-  if (!imageFile.type.startsWith("image/")) {
-    return NextResponse.json({ error: "只支持图片文件" }, { status: 400 });
-  }
-
-  if (imageFile.size <= 0 || imageFile.size > MAX_UPLOAD_SIZE) {
-    return NextResponse.json({ error: "图片大小不合法" }, { status: 400 });
+  const imageValidationError = validateReferenceImageFiles(
+    imageFiles,
+    MAX_UPLOAD_SIZE
+  );
+  if (imageValidationError) {
+    return NextResponse.json({ error: imageValidationError }, { status: 400 });
   }
 
   const { sessionId, prompt, size, quality, count } = parsed.data;
@@ -45,11 +49,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "会话不存在" }, { status: 404 });
   }
 
-  const inputBuffer = Buffer.from(await imageFile.arrayBuffer());
-  const upload = await saveBufferAsFile(
-    inputBuffer,
-    "upload",
-    extensionFromMimeType(imageFile.type)
+  const imageInputs = await Promise.all(
+    imageFiles.map(async (imageFile) => ({
+      buffer: Buffer.from(await imageFile.arrayBuffer()),
+      mimeType: imageFile.type
+    }))
+  );
+  const uploads = await Promise.all(
+    imageInputs.map((imageInput) =>
+      saveBufferAsFile(
+        imageInput.buffer,
+        "upload",
+        extensionFromMimeType(imageInput.mimeType)
+      )
+    )
   );
   let job;
 
@@ -60,16 +73,19 @@ export async function POST(request: NextRequest) {
       size,
       quality,
       count,
-      imageBuffer: inputBuffer,
-      imageMimeType: imageFile.type,
-      uploadedImage: {
+      imageInputs,
+      uploadedImages: uploads.map((upload, index) => ({
         filePath: upload.publicPath,
-        mimeType: imageFile.type,
+        mimeType: imageInputs[index].mimeType,
         sourceType: "uploaded"
-      }
+      }))
     });
   } catch (error) {
-    await removeStoredFile(upload.publicPath).catch(() => undefined);
+    await Promise.all(
+      uploads.map((upload) =>
+        removeStoredFile(upload.publicPath).catch(() => undefined)
+      )
+    );
     throw error;
   }
 

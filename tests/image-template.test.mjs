@@ -12,6 +12,7 @@ const {
   createSession,
   deleteMessageById,
   getSessionById,
+  hardDeleteMessageById,
   listImageTemplates,
   listDeletedMessages,
   restoreMessageById,
@@ -83,6 +84,17 @@ hydrated = await getSessionById(session.id);
 assert.equal(hydrated?.messages.length, 1);
 
 await deleteMessageById(completed.id);
+
+const hardDeletedMessage = await hardDeleteMessageById(completed.id);
+assert.equal(hardDeletedMessage?.messageId, completed.id);
+
+trashMessages = await listDeletedMessages(session.id);
+assert.equal(trashMessages.length, 0);
+hydrated = await getSessionById(session.id);
+assert.equal(hydrated?.messages.length, 0);
+templates = await listImageTemplates();
+assert.equal(templates.length, 1);
+assert.equal(templates[0].filePath, "/generated/template-source.png");
 
 await updateImageTemplate({
   imageId: generatedImage.id,

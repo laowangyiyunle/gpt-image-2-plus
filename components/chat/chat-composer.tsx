@@ -10,7 +10,8 @@ import {
 } from "react";
 
 export type ComposerDraft = {
-  file: File | null;
+  file?: File | null;
+  files?: File[];
   focus?: boolean;
   prompt?: string;
   version: number;
@@ -24,11 +25,17 @@ type ChatComposerProps = {
   onOpenTemplatePicker?: () => void;
   onSubmitted: (args: {
     prompt: string;
-    imageFile: File | null;
+    imageFiles: File[];
     size: string;
     quality: string;
     count: number;
   }) => Promise<void>;
+};
+
+type SelectedImage = {
+  id: string;
+  file: File;
+  previewUrl: string;
 };
 
 export function ChatComposer({
@@ -42,11 +49,9 @@ export function ChatComposer({
   const formRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const previewUrlRef = useRef<string | null>(null);
+  const previewUrlsRef = useRef<Set<string>>(new Set());
   const [prompt, setPrompt] = useState(initialPrompt ?? "");
-  const [selectedFileName, setSelectedFileName] = useState("");
-  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [size, setSize] = useState("auto");
   const [quality, setQuality] = useState("auto");
   const [count, setCount] = useState(1);
@@ -56,9 +61,10 @@ export function ChatComposer({
 
   useEffect(() => {
     return () => {
-      if (previewUrlRef.current) {
-        URL.revokeObjectURL(previewUrlRef.current);
+      for (const previewUrl of previewUrlsRef.current) {
+        URL.revokeObjectURL(previewUrl);
       }
+      previewUrlsRef.current.clear();
     };
   }, []);
 
@@ -67,7 +73,7 @@ export function ChatComposer({
       return;
     }
 
-    setSelectedImage(draft.file);
+    setSelectedReferenceImages(draft.files ?? (draft.file ? [draft.file] : []));
 
     if (draft.prompt !== undefined) {
       setPrompt(draft.prompt);
@@ -78,53 +84,81 @@ export function ChatComposer({
     }
   }, [draft]);
 
-  function updatePreview(file: File | null) {
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = null;
-    }
+  function createSelectedImage(file: File): SelectedImage {
+    const previewUrl = URL.createObjectURL(file);
+    previewUrlsRef.current.add(previewUrl);
 
-    if (!file) {
-      setPreviewUrl(null);
-      return;
-    }
-
-    const nextPreviewUrl = URL.createObjectURL(file);
-    previewUrlRef.current = nextPreviewUrl;
-    setPreviewUrl(nextPreviewUrl);
+    return {
+      id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+      file,
+      previewUrl
+    };
   }
 
-  function syncFileInput(file: File | null) {
+  function revokeSelectedImage(image: SelectedImage) {
+    URL.revokeObjectURL(image.previewUrl);
+    previewUrlsRef.current.delete(image.previewUrl);
+  }
+
+  function syncFileInput(files: File[]) {
     if (!fileInputRef.current) {
       return;
     }
 
-    if (!file) {
+    if (files.length === 0) {
       fileInputRef.current.value = "";
       return;
     }
 
     const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
+    for (const file of files) {
+      dataTransfer.items.add(file);
+    }
     fileInputRef.current.files = dataTransfer.files;
   }
 
-  function setSelectedImage(file: File | null) {
-    setSelectedImageFile(file);
-    setSelectedFileName(file?.name ?? "");
-    updatePreview(file);
-    syncFileInput(file);
+  function setSelectedReferenceImages(files: File[]) {
+    setSelectedImages((current) => {
+      for (const image of current) {
+        revokeSelectedImage(image);
+      }
+
+      return files.map(createSelectedImage);
+    });
+    syncFileInput(files);
   }
 
-  function clearSelectedImage() {
-    setSelectedImage(null);
+  function appendSelectedReferenceImages(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+
+    setSelectedImages((current) => [
+      ...current,
+      ...files.map(createSelectedImage)
+    ]);
+  }
+
+  function clearSelectedImages() {
+    setSelectedReferenceImages([]);
+  }
+
+  function removeSelectedImage(id: string) {
+    setSelectedImages((current) => {
+      const image = current.find((item) => item.id === id);
+      if (image) {
+        revokeSelectedImage(image);
+      }
+
+      return current.filter((item) => item.id !== id);
+    });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const trimmedPrompt = prompt.trim();
-    const imageFile = selectedImageFile;
+    const imageFiles = selectedImages.map((image) => image.file);
 
     if (!trimmedPrompt) {
       setError("请输入图片描述。");
@@ -135,9 +169,9 @@ export function ChatComposer({
       setSubmitting(true);
       setError(null);
       setPrompt("");
-      clearSelectedImage();
+      clearSelectedImages();
       formRef.current?.reset();
-      await onSubmitted({ prompt: trimmedPrompt, imageFile, size, quality, count });
+      await onSubmitted({ prompt: trimmedPrompt, imageFiles, size, quality, count });
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -159,32 +193,36 @@ export function ChatComposer({
   }
 
   function handlePromptPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const imageItem = Array.from(event.clipboardData.items).find((item) =>
+    const imageItems = Array.from(event.clipboardData.items).filter((item) =>
       item.type.startsWith("image/")
     );
 
-    if (!imageItem) {
+    if (imageItems.length === 0) {
       return;
     }
 
-    const pastedImage = imageItem.getAsFile();
+    const pastedImages = imageItems
+      .map((imageItem) => imageItem.getAsFile())
+      .filter((file): file is File => Boolean(file));
 
-    if (!pastedImage) {
+    if (pastedImages.length === 0) {
       return;
     }
 
     event.preventDefault();
 
-    const fileName =
-      pastedImage.name && pastedImage.name.trim()
-        ? pastedImage.name
-        : `pasted-image.${pastedImage.type.split("/")[1] || "png"}`;
+    const normalizedImages = pastedImages.map((pastedImage, index) => {
+      const fileName =
+        pastedImage.name && pastedImage.name.trim()
+          ? pastedImage.name
+          : `pasted-image-${index + 1}.${pastedImage.type.split("/")[1] || "png"}`;
 
-    const normalizedImage = new File([pastedImage], fileName, {
-      type: pastedImage.type
+      return new File([pastedImage], fileName, {
+        type: pastedImage.type
+      });
     });
 
-    setSelectedImage(normalizedImage);
+    appendSelectedReferenceImages(normalizedImages);
   }
 
   async function handleOptimizePrompt() {
@@ -298,26 +336,30 @@ export function ChatComposer({
         </label>
       </div>
 
-      {previewUrl ? (
-        <div className="composer-preview-card">
-          <img
-            src={previewUrl}
-            alt={selectedFileName || "参考图预览"}
-            className="composer-preview-image"
-          />
-          <div className="composer-preview-meta">
-            <span className="composer-preview-name">
-              {selectedFileName || "参考图预览"}
-            </span>
-            <button
-            type="button"
-            className="composer-preview-remove"
-            onClick={clearSelectedImage}
-            disabled={disabled || submitting || optimizing}
-          >
-            删除参考图
-          </button>
-          </div>
+      {selectedImages.length > 0 ? (
+        <div className="composer-preview-grid">
+          {selectedImages.map((image, index) => (
+            <div className="composer-preview-card" key={image.id}>
+              <img
+                src={image.previewUrl}
+                alt={image.file.name || `参考图预览 ${index + 1}`}
+                className="composer-preview-image"
+              />
+              <div className="composer-preview-meta">
+                <span className="composer-preview-name">
+                  {image.file.name || `参考图 ${index + 1}`}
+                </span>
+                <button
+                  type="button"
+                  className="composer-preview-remove"
+                  onClick={() => removeSelectedImage(image.id)}
+                  disabled={disabled || submitting || optimizing}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -328,10 +370,16 @@ export function ChatComposer({
             type="file"
             name="image"
             accept="image/png,image/jpeg,image/webp"
-            onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
+            multiple
+            onChange={(event) => {
+              appendSelectedReferenceImages(
+                Array.from(event.currentTarget.files ?? [])
+              );
+              event.currentTarget.value = "";
+            }}
             disabled={disabled || submitting || optimizing}
           />
-          <span>{previewUrl ? "重新选择参考图" : "上传参考图"}</span>
+          <span>{selectedImages.length > 0 ? "继续上传参考图" : "上传参考图"}</span>
         </label>
         <button
           type="button"
@@ -342,7 +390,9 @@ export function ChatComposer({
           选择模板
         </button>
         <span className="selected-file-name">
-          {selectedFileName || "未选择文件"}
+          {selectedImages.length > 0
+            ? `已选择 ${selectedImages.length} 张参考图`
+            : "未选择文件"}
         </span>
         <button type="submit" disabled={disabled || submitting || optimizing}>
           {submitting ? "生成中..." : "生成图片"}

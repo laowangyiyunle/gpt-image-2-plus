@@ -1087,6 +1087,40 @@ export async function restoreMessageById(messageId: string) {
   };
 }
 
+export async function hardDeleteMessageById(messageId: string) {
+  const db = getDb();
+  const message = db
+    .prepare(
+      `
+        SELECT id, session_id
+        FROM messages
+        WHERE id = ?
+          AND deleted_at IS NOT NULL
+      `
+    )
+    .get(messageId) as { id: string; session_id: string } | undefined;
+
+  if (!message) {
+    return null;
+  }
+
+  const filePaths = getMessageImagePaths(messageId);
+
+  const transaction = db.transaction(() => {
+    db.prepare(`DELETE FROM image_assets WHERE message_id = ?`).run(messageId);
+    db.prepare(`DELETE FROM messages WHERE id = ?`).run(messageId);
+    refreshSessionUpdatedAt(message.session_id);
+  });
+
+  transaction();
+  await cleanupFiles(filePaths);
+
+  return {
+    messageId,
+    sessionId: message.session_id
+  };
+}
+
 export async function listDeletedMessages(sessionId: string) {
   const db = getDb();
   const messageRows = db

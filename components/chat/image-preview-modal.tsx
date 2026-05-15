@@ -14,13 +14,19 @@ import {
   getFitPreviewScale,
   getMaxPreviewScale,
   getNextDoubleClickScale,
+  getNextPreviewImageIndex,
   getWheelZoomState,
   getZoomStateAtPoint
 } from "@/lib/image-preview-zoom";
 
-type ImagePreviewModalProps = {
+type PreviewImageItem = {
   filePath: string;
   alt: string;
+};
+
+type ImagePreviewModalProps = {
+  images: PreviewImageItem[];
+  initialIndex: number;
   onClose: () => void;
 };
 
@@ -35,8 +41,8 @@ type DragState = Offset & {
 };
 
 export function ImagePreviewModal({
-  filePath,
-  alt,
+  images,
+  initialIndex,
   onClose
 }: ImagePreviewModalProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -48,7 +54,27 @@ export function ImagePreviewModal({
   const [baseSize, setBaseSize] = useState({ width: 0, height: 0 });
   const [fitScale, setFitScale] = useState(DEFAULT_PREVIEW_SCALE);
   const [copyMessage, setCopyMessage] = useState("");
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const currentImage = images[currentIndex] ?? images[0];
+  const hasMultipleImages = images.length > 1;
   const maxScale = getMaxPreviewScale(fitScale);
+
+  function resetView() {
+    setScale(DEFAULT_PREVIEW_SCALE);
+    setOffset({ x: 0, y: 0 });
+  }
+
+  function goToImage(direction: -1 | 1) {
+    if (!hasMultipleImages) {
+      return;
+    }
+
+    setCurrentIndex((index) =>
+      getNextPreviewImageIndex(index, images.length, direction)
+    );
+    setCopyMessage("");
+    resetView();
+  }
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -60,6 +86,18 @@ export function ImagePreviewModal({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goToImage(-1);
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goToImage(1);
       }
     }
 
@@ -69,7 +107,7 @@ export function ImagePreviewModal({
       document.documentElement.style.overflow = previousDocumentOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose]);
+  }, [currentIndex, images.length, onClose]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -158,7 +196,7 @@ export function ImagePreviewModal({
 
   useEffect(() => {
     syncImageFit();
-  }, [filePath, stageSize]);
+  }, [currentImage?.filePath, stageSize]);
 
   function clampOffset(nextOffset: Offset, nextScale = scale) {
     return clampPreviewOffset({
@@ -167,11 +205,6 @@ export function ImagePreviewModal({
       baseSize,
       stageSize
     });
-  }
-
-  function resetView() {
-    setScale(DEFAULT_PREVIEW_SCALE);
-    setOffset({ x: 0, y: 0 });
   }
 
   function applyZoom(nextScale: number, pointer: Offset = { x: 0, y: 0 }) {
@@ -251,7 +284,12 @@ export function ImagePreviewModal({
   async function handleCopyImage() {
     try {
       setCopyMessage("");
-      const response = await fetch(filePath);
+
+      if (!currentImage) {
+        throw new Error("无法读取图片");
+      }
+
+      const response = await fetch(currentImage.filePath);
 
       if (!response.ok) {
         throw new Error("无法读取图片");
@@ -294,6 +332,10 @@ export function ImagePreviewModal({
     }
   }
 
+  if (!currentImage) {
+    return null;
+  }
+
   return (
     <div
       className="image-preview-backdrop"
@@ -308,7 +350,18 @@ export function ImagePreviewModal({
           <span className="image-preview-zoom-label">
             适屏 {Math.round(scale * 100)}%
             {fitScale < 1 ? ` / 原图 ${Math.round(scale * fitScale * 100)}%` : ""}
+            {hasMultipleImages ? ` · ${currentIndex + 1}/${images.length}` : ""}
           </span>
+          {hasMultipleImages ? (
+            <>
+              <button type="button" title="上一张" onClick={() => goToImage(-1)}>
+                ←
+              </button>
+              <button type="button" title="下一张" onClick={() => goToImage(1)}>
+                →
+              </button>
+            </>
+          ) : null}
           <button type="button" title="缩小" onClick={() => zoomBy(-1)}>
             -
           </button>
@@ -321,7 +374,7 @@ export function ImagePreviewModal({
           <button type="button" onClick={() => void handleCopyImage()}>
             {copyMessage || "复制"}
           </button>
-          <a href={filePath} download>
+          <a href={currentImage.filePath} download>
             下载
           </a>
           <button type="button" onClick={onClose}>
@@ -338,8 +391,8 @@ export function ImagePreviewModal({
         >
           <img
             ref={imageRef}
-            src={filePath}
-            alt={alt}
+            src={currentImage.filePath}
+            alt={currentImage.alt}
             draggable={false}
             onLoad={() => {
               resetView();

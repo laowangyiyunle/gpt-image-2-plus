@@ -62,8 +62,12 @@ export async function POST(request: NextRequest) {
   try {
     const images = await generateImageFromEdit({
       prompt,
-      imageBuffer: inputBuffer,
-      imageMimeType: imageFile.type,
+      imageInputs: [
+        {
+          buffer: inputBuffer,
+          mimeType: imageFile.type
+        }
+      ],
       size,
       quality,
       count

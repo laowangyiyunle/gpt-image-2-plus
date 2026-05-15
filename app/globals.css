@@ -894,6 +894,12 @@ select:disabled {
   box-shadow: 0 0 0 3px rgba(22, 124, 128, 0.13);
 }
 
+.composer-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
 .composer-params-row,
 .composer-actions-row {
   display: grid;
@@ -957,7 +963,7 @@ select:disabled {
 }
 
 .composer-preview-name {
-  max-width: 240px;
+  max-width: 100%;
   color: var(--muted);
   font-size: 13px;
   overflow: hidden;
@@ -1275,19 +1281,40 @@ select:disabled {
   object-fit: cover;
 }
 
-.trash-restore-button {
+.trash-item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.trash-restore-button,
+.trash-hard-delete-button {
   align-self: start;
-  border: 1px solid rgba(22, 124, 128, 0.28);
   border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
   padding: 8px 11px;
   cursor: pointer;
+}
+
+.trash-restore-button {
+  border: 1px solid rgba(22, 124, 128, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .trash-restore-button:hover {
   border-color: rgba(22, 124, 128, 0.48);
   background: #d7eeeb;
+}
+
+.trash-hard-delete-button {
+  border: 1px solid rgba(180, 35, 24, 0.24);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.trash-hard-delete-button:hover {
+  background: #ffe1dd;
 }
 
 .template-picker-backdrop {
